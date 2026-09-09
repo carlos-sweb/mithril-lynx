@@ -98,6 +98,8 @@ Mithril has no `useRef`/`ref` hook system — the idiomatic way to reach a real 
   });
   ```
 
+  **Confirmed working on a real device** (see `DEVICE_VERIFICATION.md`): `invoke("boundingClientRect", {})` resolved with a real native response (`{code: 0, data: {top, left, width, height, ...}}`), confirming `__InvokeUIMethod`'s callback contract matches what this file assumes.
+
 - **Background-thread side** (`mithril-lynx/background`'s `createRef(selector)`): the background thread has no direct native handle, so imperative calls go through Lynx's existing `lynx.createSelectorQuery().select(selector).invoke({...}).exec()` bridge — the same primitive ReactLynx's own background-thread refs ultimately use.
 
   ```js
@@ -153,7 +155,7 @@ m("view", {
 
 `waitFor`/`simultaneousWith`/`continueWith` take arrays of *other* `createGesture()` return values, for gesture-arena composition (e.g. a pan that only starts after a tap gesture fails). If a callback needs to notify background-owned state, call `main-thread.js`'s `runOnBackground()` (previous section) from inside it — an explicit, opt-in cross-thread hop, not something gesture composition requires structurally.
 
-**Unverified against a real device** (see the project plan's "Parity boundaries," point 3): the `config`/`relationMap` shape passed to `__SetGestureDetector` is copied verbatim from `@lynx-js/react`'s own shipped `processGesture.js` — real, proven code, not guesswork. What *isn't* proven: whether native's callback slot accepts a plain JS function (this file's assumption) or specifically expects a Worklet-shaped object — ReactLynx always uses worklets for gesture callbacks, so a zero-compiler implementation calling it with a bare function has never been exercised before this package. Treat this as the first thing to verify on a real device before relying on it.
+**Confirmed BROKEN on a real device** (see `DEVICE_VERIFICATION.md`): `__SetGestureDetector` accepts the call without error, but a real touch gesture never invokes the plain-function callback — confirmed with `lynx-devtool`'s live console open, which showed zero output in response to a real swipe (not even a warning). Native almost certainly requires a Worklet-shaped callback object and silently ignores anything else. **Do not use `createGesture` as currently implemented** — it registers successfully but does nothing. A real fix needs either a minimal Worklet-shaped wrapper for plain functions, or confirmed documentation of the callback contract; see `DEVICE_VERIFICATION.md` for the current state of that investigation.
 
 ## Lists
 
@@ -185,6 +187,8 @@ Two tiers, matching the real complexity spread in Lynx's own `list` examples:
   ```
 
   The sign/recycle-pool design (cells reused by *type*, matching RecyclerView/UICollectionView semantics) and the exact `__FlushElementTree({ triggerLayout, operationID, elementID, listID })` call shape are ported from `@lynx-js/react`'s own shipped `list.js` — real, proven code. `renderItem(index)` must return a fresh vnode every time it's called (it can be called more than once for the same index, on recycling); a recycled cell's content is *diffed* into its existing DOM subtree via Mithril's own diff, not recreated — verified in `test/list.test.ts` by asserting no new `__CreateElement` calls happen on reuse.
+
+  **Confirmed BROKEN on a real device** (see `DEVICE_VERIFICATION.md`): `__CreateList(...)` doesn't crash, but native never calls `componentAtIndex` — no cells ever render, even after explicitly sizing both the container and the `<list>` element itself. **Do not use `createList` as currently implemented** — something this port doesn't replicate (a required attribute, an explicit reload signal, or similar) is missing between `__CreateList` and native actually activating the list. Not yet diagnosed; needs `lynx-devtool`'s element-tree inspector.
 
   **Deliberately out of scope for v1** (documented, not silently missing): deferred list items (ReactLynx's `defer`/`isReady` promise dance), `componentAtIndexes` batching, and independent per-item redraw after the initial bind — a bound cell's content is recomputed fresh from `renderItem(index)` only when native calls `componentAtIndex` for it (scroll-driven reuse), not automatically when app state changes.
 
