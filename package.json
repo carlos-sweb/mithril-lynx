@@ -73,16 +73,17 @@
     "test": "rstest run"
   },
   "dependencies": {
-    "mithril": "2.3.8",
     "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4",
     "@lynx-js/template-webpack-plugin": "^0.16.0"
   },
   "peerDependencies": {
+    "mithril": "2.3.8",
     "@lynx-js/type-element-api": "0.0.9",
     "@lynx-js/types": "4.1.0",
     "@lynx-js/rspeedy": "^0.17.0"
   },
   "devDependencies": {
+    "mithril": "2.3.8",
     "@lynx-js/testing-environment": "npm:@lynx-js/testing-environment-canary@0.3.2-canary-20260803-5a891c73",
     "@rstest/core": "^0.11.3",
     "jsdom": "^28.0.0",

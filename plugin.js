@@ -17,6 +17,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 import { RuntimeWrapperWebpackPlugin } from "@lynx-js/runtime-wrapper-webpack-plugin";
 import { LynxEncodePlugin, LynxTemplatePlugin } from "@lynx-js/template-webpack-plugin";
@@ -43,6 +44,31 @@ export function pluginMithrilLynx(options = {}) {
 			// Keep the template plugin discoverable by Rspeedy's Lynx internals.
 			api.expose(Symbol.for("LynxTemplatePlugin"), { LynxTemplatePlugin });
 			api.modifyBundlerChain((chain) => {
+				// mithril-lynx's own src/lynx-mithril-shim.js deep-imports mithril's
+				// internal render/cachedAttrsIsStaticMap.js (and its emptyAttrs
+				// singleton). If the app's own `require("mithril")` resolves to a
+				// DIFFERENT physical copy of the package than the one mithril-lynx
+				// itself was installed/linked with — the norm for a `file:`-linked
+				// local package, whose own node_modules (built for ITS OWN tests)
+				// shadows Node's normal directory-walk resolution once linked — the
+				// two copies' emptyAttrs singletons differ. The shim then can't
+				// recognize the app's legitimately-reused empty-attrs object as
+				// such, and Mithril's own updateAttrs() misfires its "Don't reuse
+				// attrs object" warning on every plain `m(tag, null, ...)` element,
+				// every redraw. Force a single resolution by aliasing "mithril" to
+				// whatever copy the app itself resolves from its own project root.
+				try {
+					const appRequire = createRequire(path.join(process.cwd(), "package.json"));
+					// Resolve the PACKAGE DIRECTORY (not mithril's own main entry
+					// file) — a prefix alias needs "mithril/render/x" to rewrite to
+					// "<dir>/render/x", which only works aliased to a directory.
+					const mithrilDir = path.dirname(appRequire.resolve("mithril/package.json"));
+					chain.resolve.alias.set("mithril", mithrilDir);
+				} catch {
+					// App has no local "mithril" resolvable from its own root —
+					// leave resolution as-is rather than guessing.
+				}
+
 				const rawEntries = Object.entries(chain.entryPoints.entries() ?? {});
 				chain.entryPoints.clear();
 
