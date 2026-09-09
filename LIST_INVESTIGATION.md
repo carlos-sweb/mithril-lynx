@@ -1,5 +1,13 @@
 # List Tier 2 investigation plan
 
+## Resolution (2026-09-09)
+
+**Fixed and confirmed working on-device.** Step 1 (adding `scroll-orientation`/`list-type`/`span-count`/`item-key` attributes) was necessary but not sufficient — the list still stayed empty after that alone. The real missing piece, found while re-reading `@lynx-js/react`'s own `listUpdateInfo.js` (not `list.js`, which this project had already read) between Steps 1 and 2: native only starts calling `componentAtIndex` at all after receiving a `"update-list-info"` attribute (`{insertAction, removeAction, updateAction}`) alongside a matching `__UpdateListCallbacks` call — `__CreateList` alone never triggers it. A first attempt at this (an `insertAction` array missing `item-key` on each entry) produced a **real, specific native error** — `"Error for illegal list item-key in parse insertAction"` — that directly pinpointed the fix, at which point 37+ cells rendered and scrolled correctly.
+
+This validates the plan's own Step 2/3 reasoning in a different order than expected: rather than needing the element inspector or a known-good control build (Steps 2-3), re-reading the *rest* of the real source (a file adjacent to the one already read, not yet examined) surfaced the answer, and the device itself supplied a specific error once the fix was close enough to be almost right — silence isn't always permanent; sometimes it just means the wrong thing hasn't been tried yet.
+
+See `list.js`'s own code comments and `DEVICE_VERIFICATION.md`'s updated table row for the final, shipped fix. Steps 2-4 below are kept as-written for historical reference / as a template for the *next* silent on-device failure (gestures, currently).
+
 ## Problem recap
 
 `mithril-lynx/list`'s `createList(parentNode, options)` calls `__CreateList(pageId, componentAtIndex, enqueueComponent, {})` without crashing, but on a real device (Galaxy A07, 2026-09-09) native never calls `componentAtIndex` — the list area renders as an empty, correctly-sized box and stays empty through scrolling. No error, no console output at all (see `DEVICE_VERIFICATION.md`).

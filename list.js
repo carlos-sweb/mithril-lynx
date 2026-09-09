@@ -53,11 +53,28 @@ function typeKeyOf(vnode) {
  * LynxNodeWrapper). `renderItem(index)` must return a fresh Mithril vnode
  * for that cell's content every time it's called — it may be called more
  * than once for the same index (recycling).
+ *
+ * `scrollOrientation`/`listType`/`spanCount` and each item's `item-key` are
+ * NOT optional in practice, even though native's __CreateList/componentAtIndex
+ * types don't require them: every real @lynx-js/react list example sets all
+ * of these unconditionally (verified by reading lynx-examples/examples/list's
+ * base/recyclable/async-rendering demos — see ../LIST_INVESTIGATION.md), and
+ * a real device never called componentAtIndex at all without them. Defaults
+ * here match what those examples use for the simple single-column case.
  */
 export function createList(parentNode, options) {
-	const { itemCount, renderItem, className } = options;
+	const {
+		itemCount,
+		renderItem,
+		itemKey,
+		className,
+		scrollOrientation = "vertical",
+		listType = "single",
+		spanCount = 1,
+	} = options;
 	let count = itemCount;
 	const pageId = parentNode.ownerDocument._pageId;
+	const keyOf = typeof itemKey === "function" ? itemKey : (index) => String(index);
 
 	// itemType -> Map<sign, ItemEntry>, the reuse pool.
 	const recycleMap = new Map();
@@ -66,6 +83,7 @@ export function createList(parentNode, options) {
 
 	function bindFreshItem(listHandle, listId, cellIndex, opId, vnode, typeKey) {
 		const itemWrapper = parentNode.ownerDocument.createElement("list-item");
+		__SetAttribute(itemWrapper._handle, "item-key", keyOf(cellIndex));
 		__AppendElement(listHandle, itemWrapper._handle);
 		renderItemContent(itemWrapper, vnode);
 
@@ -75,9 +93,12 @@ export function createList(parentNode, options) {
 		return sign;
 	}
 
-	function bindRecycledItem(listId, opId, vnode, pool) {
+	function bindRecycledItem(listId, cellIndex, opId, vnode, pool) {
 		const [sign, entry] = pool.entries().next().value;
 		pool.delete(sign);
+		// The recycled wrapper is now bound to a DIFFERENT index — its
+		// item-key must be updated to match, the same way its content does.
+		__SetAttribute(entry.wrapper._handle, "item-key", keyOf(cellIndex));
 		renderItemContent(entry.wrapper, vnode);
 		signMap.set(sign, entry);
 		__FlushElementTree(entry.wrapper._handle, { triggerLayout: true, operationID: opId, elementID: sign, listID: listId });
@@ -91,7 +112,7 @@ export function createList(parentNode, options) {
 		const vnode = renderItem(cellIndex);
 		const typeKey = typeKeyOf(vnode);
 		const pool = recycleMap.get(typeKey);
-		if (pool && pool.size > 0) return bindRecycledItem(listId, opId, vnode, pool);
+		if (pool && pool.size > 0) return bindRecycledItem(listId, cellIndex, opId, vnode, pool);
 		return bindFreshItem(listHandle, listId, cellIndex, opId, vnode, typeKey);
 	}
 
@@ -103,14 +124,61 @@ export function createList(parentNode, options) {
 		recycleMap.get(entry.typeKey).set(sign, entry);
 	}
 
+	// THE missing piece (see LIST_INVESTIGATION.md): __CreateList + attributes
+	// alone never triggers componentAtIndex — native only starts requesting
+	// cells once it's told, via a special "update-list-info" attribute, which
+	// positions currently exist. Ported from @lynx-js/react's OWN
+	// runtime/lib/snapshot/list/listUpdateInfo.js (ListUpdateInfoRecording.flush()),
+	// which sends this on every list-children change, alongside a matching
+	// __UpdateListCallbacks call. Each insertAction entry needs an "item-key"
+	// (dash-case — confirmed by a real device rejecting the first attempt,
+	// which omitted it, with "Error for illegal list item-key in parse
+	// insertAction"; the exact key name matches ReactLynx's own
+	// `__listItemPlatformInfo['item-key']`, a raw JSX-prop-shaped bag it
+	// spreads into each entry). `type` per entry is still UNCONFIRMED —
+	// ReactLynx's version uses its own component-type reference there
+	// (meaningful only to its own recycling, not to native, as far as this
+	// file's reading of the source can tell); a constant string is used
+	// here since this port's own type-based recycling (typeKeyOf(), above)
+	// is tracked independently, in this module, not through native's copy
+	// of `type`.
+	function sendListInfo(insertAction, removeAction, updateAction) {
+		__SetAttribute(listHandle, "update-list-info", { insertAction, removeAction, updateAction });
+		__UpdateListCallbacks(listHandle, componentAtIndex, enqueueComponent);
+	}
+
+	function insertEntry(position) {
+		return { position, type: "cell", "item-key": keyOf(position) };
+	}
+
 	const listHandle = __CreateList(pageId, componentAtIndex, enqueueComponent, {});
+	__SetAttribute(listHandle, "scroll-orientation", scrollOrientation);
+	__SetAttribute(listHandle, "list-type", listType);
+	__SetAttribute(listHandle, "span-count", String(spanCount));
 	if (className != null) __SetClasses(listHandle, className);
+
+	sendListInfo(
+		Array.from({ length: count }, (_, position) => insertEntry(position)),
+		[],
+		[],
+	);
 
 	return {
 		_handle: listHandle,
 		nodeType: 1,
 		/** Call after mutating the underlying data so a subsequently-scrolled-into-view cell reflects the new count. */
 		setItemCount(nextCount) {
+			if (nextCount === count) return;
+			if (nextCount > count) {
+				sendListInfo(
+					Array.from({ length: nextCount - count }, (_, i) => insertEntry(count + i)),
+					[],
+					[],
+				);
+			} else {
+				const removed = Array.from({ length: count - nextCount }, (_, i) => nextCount + i);
+				sendListInfo([], removed, []);
+			}
 			count = nextCount;
 		},
 	};

@@ -5,7 +5,15 @@ export interface CreateListOptions {
   itemCount: number;
   /** Must return a fresh vnode for the cell's content; may be called more than once for the same index (recycling). */
   renderItem(index: number): unknown;
+  /** Defaults to String(index). Set on every item's "item-key" attribute — required by native, not just an identity hint. */
+  itemKey?(index: number): string;
   className?: string;
+  /** Defaults to "vertical". */
+  scrollOrientation?: "vertical" | "horizontal";
+  /** Defaults to "single". */
+  listType?: "single" | "flow";
+  /** Defaults to 1. */
+  spanCount?: number;
 }
 
 export interface ListHandle {
