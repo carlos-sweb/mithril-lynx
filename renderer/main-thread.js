@@ -21,6 +21,14 @@ import {
 	rendererPatchEventName,
 } from "../internal/constants.js";
 
+// The native engine unconditionally invokes a global `processData(initData)`
+// hook on every __RenderPage, regardless of framework or rendering mode —
+// found missing here via real-device testing (main-thread.js, data-channel
+// mode, already had this fix from Phase 1; this file was never given it).
+Object.assign(globalThis, {
+	processData: (data) => data,
+});
+
 /**
  * Waits for __RenderPage to create the real page (matching data-channel
  * mode's timing, in case native requires it before the tree can be built),

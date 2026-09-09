@@ -121,7 +121,16 @@ function flushTree() {
 	for (var i = 0; i < styleProxies.length; i++) {
 		try { styleProxies[i]._flush() } catch (e) { /* ignore */ }
 	}
-	__FlushElementTree()
+	// __FlushElementTree is a main-thread-only PAPI global. This same shim
+	// module is also used on the background thread in "renderer mode"
+	// (renderer/background.js), driving a VirtualNodeWrapper tree that has
+	// no real PAPI to flush — that side's own op-log dispatch is its
+	// equivalent of a flush. Found via real-device testing: the jsdom test
+	// polyfill leaves __FlushElementTree defined globally even after
+	// switching to the simulated background thread (switchToBackgroundThread
+	// only overwrites keys present in ITS OWN globals snapshot, never
+	// deletes leftover ones), so this gap never surfaced as a test failure.
+	if (typeof __FlushElementTree === "function") __FlushElementTree()
 }
 
 function maybeFlush() {
