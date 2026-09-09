@@ -1,0 +1,91 @@
+{
+  "name": "mithril-lynx",
+  "version": "0.0.1",
+  "description": "Mithril.js rendered through Lynx's Element PAPI — a contract-complete port of mithril/render/render.js@2.3.8 to the Lynx main thread, packaged as a reusable framework.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/lynx-mithril-shim.d.ts",
+      "default": "./src/lynx-mithril-shim.js"
+    },
+    "./plugin": {
+      "types": "./plugin.d.ts",
+      "default": "./plugin.js"
+    },
+    "./main-thread": {
+      "types": "./main-thread.d.ts",
+      "default": "./main-thread.js"
+    },
+    "./background": {
+      "types": "./background.d.ts",
+      "default": "./background.js"
+    },
+    "./renderer/main-thread": {
+      "types": "./renderer/main-thread.d.ts",
+      "default": "./renderer/main-thread.js"
+    },
+    "./renderer/background": {
+      "types": "./renderer/background.d.ts",
+      "default": "./renderer/background.js"
+    },
+    "./element": {
+      "types": "./element.d.ts",
+      "default": "./element.js"
+    },
+    "./gesture": {
+      "types": "./gesture.d.ts",
+      "default": "./gesture.js"
+    },
+    "./list": {
+      "types": "./list.d.ts",
+      "default": "./list.js"
+    },
+    "./testing": {
+      "types": "./testing.d.ts",
+      "default": "./testing.js"
+    }
+  },
+  "files": [
+    "src",
+    "internal",
+    "renderer",
+    "plugin.js",
+    "plugin.d.ts",
+    "main-thread.js",
+    "main-thread.d.ts",
+    "background.js",
+    "background.d.ts",
+    "element.js",
+    "element.d.ts",
+    "gesture.js",
+    "gesture.d.ts",
+    "list.js",
+    "list.d.ts",
+    "testing.js",
+    "testing.d.ts",
+    "CONTRACT.md"
+  ],
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "test": "rstest run"
+  },
+  "dependencies": {
+    "mithril": "2.3.8",
+    "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4",
+    "@lynx-js/template-webpack-plugin": "^0.16.0"
+  },
+  "peerDependencies": {
+    "@lynx-js/type-element-api": "0.0.9",
+    "@lynx-js/types": "4.1.0",
+    "@lynx-js/rspeedy": "^0.17.0"
+  },
+  "devDependencies": {
+    "@lynx-js/testing-environment": "npm:@lynx-js/testing-environment-canary@0.3.2-canary-20260803-5a891c73",
+    "@rstest/core": "^0.11.3",
+    "jsdom": "^28.0.0",
+    "typescript": "~6.0.3"
+  }
+}
