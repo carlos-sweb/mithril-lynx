@@ -135,7 +135,7 @@ ReactLynx's Main Thread Scripting (worklets) exists to solve two different probl
 
 ## Gestures
 
-`mithril-lynx/gesture`'s `createGesture(node, options)` is a thin, same-thread wrapper over `__SetGestureDetector` — no worklets, no serialization, since gesture recognition and its callbacks all run on the main thread already:
+`mithril-lynx/gesture`'s `createGesture(node, options)` is a thin, same-thread wrapper over `__SetGestureDetector` — no cross-thread serialization, since gesture recognition and its callbacks all run on the main thread already. It DOES need a small amount of worklet machinery, though (see below) — native invokes gesture callbacks by looking them up in a registry, not by calling a function value directly, and `mithril-lynx` supplies a minimal, from-scratch registry for exactly this (`src/worklet-runtime.js`), not a dependency on `@lynx-js/react`'s own.
 
 ```js
 import { createGesture, GestureType } from "mithril-lynx/gesture";
@@ -153,9 +153,11 @@ m("view", {
 });
 ```
 
+Each callback is actually invoked as `(event, controller) => {}` — `controller` is a native gesture-arena handle (`{__SetGestureState, __ConsumeGesture}`); most callbacks can ignore it and just take `event` (or no parameters at all, as above).
+
 `waitFor`/`simultaneousWith`/`continueWith` take arrays of *other* `createGesture()` return values, for gesture-arena composition (e.g. a pan that only starts after a tap gesture fails). If a callback needs to notify background-owned state, call `main-thread.js`'s `runOnBackground()` (previous section) from inside it — an explicit, opt-in cross-thread hop, not something gesture composition requires structurally.
 
-**Confirmed BROKEN on a real device** (see `DEVICE_VERIFICATION.md`): `__SetGestureDetector` accepts the call without error, but a real touch gesture never invokes the plain-function callback — confirmed with `lynx-devtool`'s live console open, which showed zero output in response to a real swipe (not even a warning). Native almost certainly requires a Worklet-shaped callback object and silently ignores anything else. **Do not use `createGesture` as currently implemented** — it registers successfully but does nothing. A real fix needs either a minimal Worklet-shaped wrapper for plain functions, or confirmed documentation of the callback contract; see `DEVICE_VERIFICATION.md` for the current state of that investigation.
+**Confirmed WORKING end-to-end on a real device 2026-09-09** (see `DEVICE_VERIFICATION.md` for the full story): a real `adb shell input swipe` across a `PAN`-gesture element drove its callbacks through start → update → end with zero errors. Getting there took three stacked fixes, in order: (1) gesture callbacks must be wrapped as worklet-ctx objects (`{_wkltId}`), not passed as plain functions — `createGesture()` does this internally via `src/worklet-runtime.js`, a small from-scratch worklet registry, transparent to callers; (2) the consuming app's `lynx.config.ts` must pass `{ enableNewGesture: true }` to `pluginLynxConfig()` — without it, native's entire gesture arena stays off and `__SetGestureDetector` calls are silently inert; (3) `worklet-runtime.js` must call callbacks positionally (`fn.bind(ctx)(...args)`), never via `Function.prototype.apply()` — the native `controller` argument throws under `apply()`'s argument marshalling specifically. (1) and (3) are internal to this package; (2) is a one-line addition an app using `mithril-lynx/gesture` must make itself.
 
 ## Lists
 

@@ -21,9 +21,15 @@ export interface Gesture {
   setState(state: number): void;
 }
 
+export interface GestureController {
+  __SetGestureState(state: number): void;
+  __ConsumeGesture(options: Record<string, boolean>): void;
+}
+
 export interface CreateGestureOptions {
   type: number | GestureTypeName;
-  callbacks?: Record<string, (...args: unknown[]) => unknown>;
+  /** Each callback is invoked as `(event, controller) => {}`; `controller` can usually be ignored. */
+  callbacks?: Record<string, (event: unknown, controller: GestureController) => unknown>;
   waitFor?: Gesture[];
   simultaneousWith?: Gesture[];
   continueWith?: Gesture[];

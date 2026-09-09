@@ -4,9 +4,11 @@ import { createGesture, GestureType } from "../gesture.js";
 
 // Project plan, Phase 7: verifies createGesture() calls __SetGestureDetector
 // with the exact config/relationMap shape @lynx-js/react's own
-// processGesture.js uses (ground truth, not guesswork) — see gesture.js's
-// header comment for what's still unverified against a real device (whether
-// the callback slot accepts a plain function, as assumed here).
+// processGesture.js uses (ground truth, not guesswork). Each callback is now
+// wrapped as a worklet ctx object (`{_wkltId}`), not passed as a plain
+// function — see gesture.js's header comment for why a real device silently
+// dropped a plain-function callback, confirmed by reading
+// runtime/lib/worklet-runtime/workletRuntime.js.
 
 const papiCalls = (): { fn: string; args: unknown[] }[] => (globalThis as any).__papiCalls;
 const lastCallOf = (fn: string) => papiCalls().filter((c) => c.fn === fn).at(-1);
@@ -36,13 +38,63 @@ describe("gesture.js", () => {
     const attrCalls = papiCalls().filter((c) => c.fn === "__SetAttribute");
     expect(attrCalls.some((c) => c.args[1] === "has-react-gesture" && c.args[2] === true)).toBe(true);
 
-    expect(lastCallOf("__SetGestureDetector")?.args).toEqual([
-      view._handle,
-      pan.id,
-      GestureType.PAN,
-      { callbacks: [{ name: "onStart", callback: onStart }, { name: "onEnd", callback: onEnd }] },
-      { waitFor: [], simultaneous: [], continueWith: [] },
-    ]);
+    const args = lastCallOf("__SetGestureDetector")?.args as any[];
+    expect(args[0]).toBe(view._handle);
+    expect(args[1]).toBe(pan.id);
+    expect(args[2]).toBe(GestureType.PAN);
+    expect(args[4]).toEqual({ waitFor: [], simultaneous: [], continueWith: [] });
+
+    // Each callback is a worklet ctx object (`{_wkltId}`), NOT the plain
+    // function — native's real runWorklet() rejects anything that isn't an
+    // object with `_wkltId`/`_lepusWorkletHash` (see gesture.js's header).
+    const cbs = args[3].callbacks as { name: string; callback: unknown }[];
+    expect(cbs.map((c) => c.name)).toEqual(["onStart", "onEnd"]);
+    for (const c of cbs) {
+      expect(typeof c.callback).toBe("object");
+      expect(c.callback).toHaveProperty("_wkltId");
+    }
+
+    void onStart;
+    void onEnd;
+  });
+
+  it("dispatches through globalThis.runWorklet the same way native does, calling the original function", () => {
+    const { view } = setupNode();
+    const seen: unknown[] = [];
+    createGesture(view, { type: "pan", callbacks: { onUpdate: (e: unknown) => seen.push(e) } });
+
+    const args = lastCallOf("__SetGestureDetector")?.args as any[];
+    const updateCb = args[3].callbacks[0].callback;
+
+    expect(typeof (globalThis as any).runWorklet).toBe("function");
+    (globalThis as any).runWorklet(updateCb, ["fake-update-event"]);
+    expect(seen).toEqual(["fake-update-event"]);
+
+    // A ctx that isn't a registered worklet is dropped silently, matching
+    // native's own validateWorklet() behavior — no throw either way.
+    expect(() => (globalThis as any).runWorklet({ _wkltId: "not-a-real-id" }, [])).not.toThrow();
+    expect(() => (globalThis as any).runWorklet(() => {}, [])).not.toThrow();
+  });
+
+  it("passes native's real 2-arg (event, controller) shape through positionally, in order", () => {
+    // Real native gesture dispatch calls callbacks as (event, controller) —
+    // see gesture.js's header, item 3. jsdom's plain V8 engine can't
+    // reproduce the actual on-device failure (Function.prototype.apply()
+    // choking on the real native controller object specifically), so this
+    // only pins the observable contract: both arguments arrive, in order.
+    // worklet-runtime.js's own code comment is what guards against
+    // reintroducing fn.apply(ctx, args) there.
+    const { view } = setupNode();
+    const seenArgs: unknown[][] = [];
+    createGesture(view, { type: "pan", callbacks: { onUpdate: (...args: unknown[]) => seenArgs.push(args) } });
+
+    const args = lastCallOf("__SetGestureDetector")?.args as any[];
+    const updateCb = args[3].callbacks[0].callback;
+    const controllerStandIn = { __SetGestureState() {}, __ConsumeGesture() {} };
+
+    (globalThis as any).runWorklet(updateCb, ["fake-event", controllerStandIn]);
+
+    expect(seenArgs).toEqual([["fake-event", controllerStandIn]]);
   });
 
   it("accepts a numeric GestureType directly, and passes through a config object", () => {
