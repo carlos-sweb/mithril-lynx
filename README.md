@@ -22,6 +22,12 @@ This is part of a larger effort to bring Mithril to full functional parity with 
 import shim from "mithril-lynx";
 import m from "mithril";
 
+// The native engine unconditionally calls a global processData(initData)
+// on every __RenderPage/__UpdatePage — install a pass-through default
+// (mithril-lynx/main-thread does this for you in data-channel mode, but
+// this bare pattern doesn't go through that module).
+Object.assign(globalThis, { processData: (data) => data });
+
 const engine = lynx.getEngine();
 engine.addEventListener("__RenderPage", () => {
   const page = __CreatePage("0", 0);
@@ -29,7 +35,7 @@ engine.addEventListener("__RenderPage", () => {
 });
 ```
 
-Subsequent UI updates flow through `shim.redraw()` (called automatically by event handlers bound via Mithril's own `on*` attrs, since the shim ports Mithril's `EventDict`/redraw machinery verbatim).
+Subsequent UI updates flow through `shim.redraw()` (called automatically by event handlers bound via Mithril's own `on*` attrs, since the shim ports Mithril's `EventDict`/redraw machinery verbatim) — **never plain `m.redraw()`**, which is a no-op in this shim-based architecture.
 
 ## Usage — data-channel mode
 
@@ -58,7 +64,7 @@ setBackgroundEventHandler((handlerName) => {
 });
 ```
 
-`root()` is called exactly once, on the first `__RenderPage`; every later update — from the engine's `__UpdatePage` or a `background.setData()` push — flows through the shim's own `redraw()`, re-invoking the component's `view()` (not `root()` again). See `mithril-app/src/{main-thread,background,index}.ts` for a complete worked example, and `mithril-lynx/test/data-channel.test.ts` for the full cross-thread test.
+`root()` is called exactly once, on the first `__RenderPage`; every later update — from the engine's `__UpdatePage` or a `background.setData()` push — flows through the shim's own `redraw()`, re-invoking the component's `view()` (not `root()` again). See `mithril-lynx/test/data-channel.test.ts` for a complete worked example and the full cross-thread test. `mithril-app` (this project's own hello-world template) uses main-thread-owned mode instead — see its `src/{main-thread,index}.js` for that simpler pattern applied end to end.
 
 ## Usage — renderer mode
 
