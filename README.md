@@ -111,6 +111,8 @@ Mithril has no `useRef`/`ref` hook system — the idiomatic way to reach a real 
   await input.invoke("focus"); // resolves with success data, rejects with failure data
   ```
 
+  **Confirmed working on a real device 2026-09-09** (see `DEVICE_VERIFICATION.md`): a background-thread `createRef(selector).invoke("boundingClientRect", {})` resolved with a real native response, round-tripped back to the main thread through the normal data channel and displayed there.
+
 **Known quirk, not a bug**: style patches sometimes carry a key with an empty-string value (e.g. `{ backgroundColor: "" }`) instead of omitting it entirely, when a non-dash-case style property is cleared after being set via plain assignment rather than `style.setProperty()`. This matches the real `LynxStyleProxy`'s exact behavior in main-thread-owned mode too (verified — not something renderer mode changed), and `__SetInlineStyles`/CSSOM treat an empty string as "clear this property," so it's functionally equivalent to an absent key.
 
 ## Cross-thread function calls (worklet substitute)
