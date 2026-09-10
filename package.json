@@ -49,6 +49,10 @@
       "types": "./list.d.ts",
       "default": "./list.js"
     },
+    "./navigation": {
+      "types": "./navigation.d.ts",
+      "default": "./navigation.js"
+    },
     "./testing": {
       "types": "./testing.d.ts",
       "default": "./testing.js"
@@ -70,6 +74,8 @@
     "gesture.d.ts",
     "list.js",
     "list.d.ts",
+    "navigation.js",
+    "navigation.d.ts",
     "testing.js",
     "testing.d.ts",
     "CONTRACT.md"

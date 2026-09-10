@@ -206,6 +206,35 @@ Two tiers, matching the real complexity spread in Lynx's own `list` examples:
 
   **Deliberately out of scope for v1** (documented, not silently missing): deferred list items (ReactLynx's `defer`/`isReady` promise dance), `componentAtIndexes` batching, and independent per-item redraw after the initial bind — a bound cell's content is recomputed fresh from `renderItem(index)` only when native calls `componentAtIndex` for it (scroll-driven reuse), not automatically when app state changes.
 
+## Navigation
+
+`mithril-lynx/navigation`'s `createNavigator({ initial, initialAttrs? })` is a stack-based, in-memory screen navigator — deliberately **not** built on `m.route` (see "Known permanent gaps" below: Lynx pages have no URL/History API for `m.route` to hook into). Android's own Activity navigation doesn't need URLs either — it's a plain back-stack — so this is that idea directly, not a URL-shaped abstraction forced onto an environment with no URLs.
+
+```js
+import { createNavigator } from "mithril-lynx/navigation";
+import m from "mithril";
+
+const Home = {
+  view: (vnode) => m("view", { ontap: () => vnode.attrs.nav.push(Details, { id: 42 }) }, [
+    m("text", null, "Go to details"),
+  ]),
+};
+const Details = {
+  view: (vnode) => m("view", { ontap: () => vnode.attrs.nav.pop() }, [
+    m("text", null, "Details for #" + vnode.attrs.id + " — tap to go back"),
+  ]),
+};
+
+const nav = createNavigator({ initial: Home });
+shim.renderToPage(page, m(nav.Navigator)); // main-thread-owned mode
+```
+
+Every screen the navigator renders receives its own `attrs` plus a `nav` prop (`push`/`pop`/`replace`/`canGoBack`/`depth`), so screens don't need to import the navigator instance separately to navigate onward. Only the top of the stack is ever mounted — previous screens are torn down, not kept alive offscreen (matching how most single-activity/single-page navigators behave); a popped screen that needs to remember its own state should keep that state somewhere the app already owns (a module-level store, `background.js`'s data store, etc.), not rely on its own component instance surviving the pop.
+
+Built on `shim.redraw()` alone, so it works unmodified in all three rendering modes (main-thread-owned, data-channel, renderer) — `nav.push()`/`pop()`/`replace()` just trigger whichever redraw mechanism that mode already uses.
+
+**Deliberately out of scope for v1**: screen transition animations (left entirely to the app's own CSS/styling on whatever wraps `nav.Navigator`), and hardware back-button integration (no documented Lynx PAPI hook for it was found — wire a screen's own back-affordance to `nav.pop()` instead, as in the example above).
+
 ## Known permanent gaps
 
 - `m.trust` / innerHTML vnodes — no Lynx PAPI equivalent to raw innerHTML injection.
