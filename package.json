@@ -4,6 +4,14 @@
   "description": "Mithril.js rendered through Lynx's Element PAPI — a contract-complete port of mithril/render/render.js@2.3.8 to the Lynx main thread, packaged as a reusable framework.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlos-sweb/mithril-lynx.git"
+  },
+  "homepage": "https://github.com/carlos-sweb/mithril-lynx#readme",
+  "bugs": {
+    "url": "https://github.com/carlos-sweb/mithril-lynx/issues"
+  },
   "exports": {
     ".": {
       "types": "./src/lynx-mithril-shim.d.ts",
