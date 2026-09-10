@@ -243,6 +243,32 @@ Built on `shim.redraw()` alone, so it works unmodified in all three rendering mo
 
 **Deliberately out of scope for v1**: screen transition animations (left entirely to the app's own CSS/styling on whatever wraps `nav.Navigator`), and hardware back-button integration (no documented Lynx PAPI hook for it was found — wire a screen's own back-affordance to `nav.pop()` instead, as in the example above).
 
+## Custom fonts
+
+Use a plain CSS `@font-face` rule — not `lynx.addFont()`. That JS API (background-thread-only) is for loading a font dynamically *after* mount, matching [`lynx-family/lynx-examples`](https://github.com/lynx-family/lynx-examples)'s own `examples/text/src/custom_font`, which calls it from `componentDidMount` and re-renders via `setState` once its callback fires. For a font known at build time (the common case), `examples/text/src/font_face` is the pattern to copy — a declarative `@font-face`, no JS:
+
+```css
+@font-face {
+  font-family: "Ubuntu Mono";
+  src: url("./assets/fonts/ubuntu-mono-400.ttf");
+}
+
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-weight: 700;
+  src: url("./assets/fonts/ubuntu-mono-700.ttf");
+}
+
+:root {
+  font-family: "Ubuntu Mono"; /* needs enableCSSInheritance, see below */
+}
+```
+
+Two gotchas, both confirmed on real hardware 2026-09-10:
+
+- **The font file must be `.ttf`, not `.woff2`.** A `.woff2` `@font-face` compiles fine — a valid `url('data:font/woff2;base64,...')` lands in the bundle, no build error, no runtime error — but the native text renderer silently never applies it, even with a maximally-distinctive test font (swapping the default sans-serif for a cursive/marker-style face produced zero visual change). Re-pointing the exact same rule at a `.ttf` of the same font worked immediately, no other change needed. Fontsource-distributed packages only ship woff/woff2; get a `.ttf` from the font's original source instead (e.g. [`google/fonts`](https://github.com/google/fonts) for anything Google-Fonts-hosted).
+- **`font-family` set on `:root` (or any ancestor) does not cascade to descendants by default.** `@lynx-js/config-rsbuild-plugin`'s `pluginLynxConfig()` has an `enableCSSInheritance` option that's off unless set explicitly; without it, only the exact element the property is set on gets it — confirmed by setting `font-family: serif` on `:root` and seeing zero change anywhere in the tree. Turn it on (`pluginLynxConfig({ enableCSSInheritance: true })` in `lynx.config.ts`) to use a single `:root` declaration instead of repeating `font-family` on every class.
+
 ## Known permanent gaps
 
 - `m.trust` / innerHTML vnodes — no Lynx PAPI equivalent to raw innerHTML injection.
