@@ -211,6 +211,14 @@ Two tiers, matching the real complexity spread in Lynx's own `list` examples:
 - `m.trust` / innerHTML vnodes — no Lynx PAPI equivalent to raw innerHTML injection.
 - `m.route` — Lynx pages aren't URL-addressable the way DOM `history` is.
 
+## Known gap, not permanent
+
+- `m.request` — throws (`XMLHttpRequest is not defined`) rather than silently misbehaving: it's hard-wired to a real `XMLHttpRequest`, which doesn't exist in Lynx's JS runtime (neither the main-thread Lepus/QuickJS engine nor the background JS thread). Unlike `m.trust`/`m.route` above, this isn't structural — Lynx does have its own networking primitives — it just hasn't been wrapped in a `$window`-shaped compat layer yet. Use Lynx's own networking API directly (wrapped in a `Promise`, if desired) until this exists.
+
+## Rest of the public `m` API — what's actually used
+
+Beyond hyperscript (`m(...)`) itself, only `m.fragment` and `m.censor` are used as shipped from the real `mithril` package — both are pure data/diff logic with no DOM dependency, so they work unmodified. `m.render`, `m.mount`, and `m.redraw` are never called from the real package at all: `mithril-lynx` has its own equivalents (`shim.renderToPage()`/`shim.render()`/`shim.redraw()`, this README's own "Usage" sections) that target the Lynx Element PAPI instead of the DOM — calling the *real* `m.mount()`/`m.redraw()` does nothing here, since they're wired to `m.render()`'s own DOM-only render path, which this project's apps never invoke.
+
 ## Compat with the plain-JS ecosystem
 
 Mithril was never hooks-based, so — unlike React — there's no special rules-of-hooks compatibility story to build: `m.redraw()` after any state mutation already works with any plain-JS state library (a simple pub/sub store, streams, whatever). Nothing in this package needs to shim a specific state-management library for that reason; if something in the ecosystem doesn't work, it's not because of a hooks-equivalence gap.
