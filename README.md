@@ -2,6 +2,14 @@
 
 Mithril.js rendered through [Lynx](https://lynxjs.org)'s Element PAPI — the core runtime layer of a Mithril-based alternative to [`@lynx-js/react`](https://lynxjs.org/react/).
 
+## Getting started
+
+```bash
+npm create mithril-lynx@latest
+```
+
+Scaffolds a new app via [`create-mithril-lynx`](https://github.com/carlos-sweb/create-mithril-lynx) — pick **Hello World** (a tap-to-animate logo demo, the Mithril analog of Lynx's own React hello-world), **Blank** (a single line of text, nothing else), or **Basic Activity** (two screens wired with `mithril-lynx/navigation`, confirmed working end to end on a real device), in TypeScript or JavaScript. That's the fastest way to a running app; the rest of this README documents the framework itself for once you're inside one.
+
 ## What this package is
 
 `src/lynx-mithril-shim.js` is a contract-complete, line-by-line port of `mithril/render/render.js@2.3.8`: the exact same diff algorithm (`createNode`/`updateNodes`/`updateNode`/keyed-diff-with-LIS/etc.) as upstream Mithril, with every DOM call it makes redirected onto Lynx's Element PAPI (`__CreateView`, `__AppendElement`, `__SetAttribute`, `__SetInlineStyles`, `__AddEventListener`, ...) instead of the browser DOM. See `CONTRACT.md` for the exhaustive, reverse-engineered spec of exactly which DOM surface Mithril's renderer touches — that document is the reference this shim is built and validated against.
