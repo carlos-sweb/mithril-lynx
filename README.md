@@ -43,7 +43,7 @@ engine.addEventListener("__RenderPage", () => {
 });
 ```
 
-Subsequent UI updates flow through `shim.redraw()` (called automatically by event handlers bound via Mithril's own `on*` attrs, since the shim ports Mithril's `EventDict`/redraw machinery verbatim) — **never plain `m.redraw()`**, which is a no-op in this shim-based architecture.
+Subsequent UI updates flow through `shim.redraw()` — **never plain `m.redraw()`**, which is a no-op in this shim-based architecture, and **never automatically after an `on*` handler either**: every event the shim hands to a handler is normalized with `redraw: false` on purpose (confirmed on real hardware 2026-09-10 — an `ontap` handler that only mutates local main-thread state, with no round trip through a data-channel/renderer-mode push, silently doesn't repaint until `shim.redraw()` is called from inside the handler itself; no error is thrown, since Mithril's own `EventDict.handleEvent` just skips the auto-redraw when `ev.redraw === false`). This is deliberate — a real DOM redraws cheaply enough that auto-redraw-per-event is a reasonable default there; a full Lynx PAPI diff pass on every touch event is not something to default to. `mithril-lynx/navigation`'s `push`/`pop`/`replace` already do this internally (see its source), which is why call sites using only that module never need to think about it.
 
 ## Usage — data-channel mode
 
