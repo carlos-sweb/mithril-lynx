@@ -35,6 +35,28 @@ function findSibling(dir, candidates) {
 	return null;
 }
 
+/**
+ * Walks up from a resolved file to the root of the package that owns it,
+ * verified by name rather than assumed from the layout — this package's
+ * exports map deliberately doesn't expose ./package.json, so the usual
+ * require.resolve("<pkg>/package.json") trick isn't available here.
+ */
+function packageRootOf(resolvedFile) {
+	let dir = path.dirname(resolvedFile);
+	for (let i = 0; i < 10; i++) {
+		try {
+			const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+			if (pkg.name === "mithril-lynx") return dir;
+		} catch {
+			// keep walking
+		}
+		const parent = path.dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return null;
+}
+
 export function pluginMithrilLynx(options = {}) {
 	const targetSdkVersion = options.targetSdkVersion ?? "3.5";
 
@@ -67,6 +89,34 @@ export function pluginMithrilLynx(options = {}) {
 				} catch {
 					// App has no local "mithril" resolvable from its own root —
 					// leave resolution as-is rather than guessing.
+				}
+
+				// Same class of problem, worse symptom: mithril-lynx itself keeps
+				// per-app state in module-level variables — the shim's rootWrapper/
+				// redraw/runRender, main-thread.js's latestData and its cross-thread
+				// handler maps, background.js's mirror of those. Two physical copies
+				// means two disconnected renderers: the app renders through one, and
+				// any LIBRARY that depends on mithril-lynx (a component library, say,
+				// resolving its own nested copy once linked) calls shim.redraw() on
+				// the other — whose `redraw` is still null. That's a silent no-op:
+				// no error, nothing logged, components simply never update. Confirmed
+				// on real hardware 2026-09-11 while building mithril-lynx-ui, where
+				// it read as "the animation just doesn't run".
+				try {
+					const appRequire = createRequire(path.join(process.cwd(), "package.json"));
+					const selfDir = packageRootOf(appRequire.resolve("mithril-lynx"));
+					if (selfDir != null) {
+						// The bare specifier has to point at the entry FILE: aliasing it
+						// to the directory would bypass this package's own exports map
+						// (which has no "main" to fall back on) and fail to resolve.
+						// The prefix alias then keeps subpaths — "mithril-lynx/main-thread"
+						// and friends, which hold state of their own — on that same copy.
+						chain.resolve.alias.set("mithril-lynx$", path.join(selfDir, "src", "lynx-mithril-shim.js"));
+						chain.resolve.alias.set("mithril-lynx", selfDir);
+					}
+				} catch {
+					// App doesn't resolve mithril-lynx from its own root (it's being
+					// consumed some other way) — leave resolution alone.
 				}
 
 				const rawEntries = Object.entries(chain.entryPoints.entries() ?? {});
