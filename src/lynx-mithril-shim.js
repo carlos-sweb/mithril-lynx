@@ -353,7 +353,15 @@ DIRECT_PROPS.forEach(function (p) {
 
 LynxNodeWrapper.prototype._setDirectProp = function (key, value) {
 	if (key === "className") {
-		__SetClasses(this._handle, value == null ? undefined : String(value))
+		// "" (not undefined) when clearing: real hardware's FiberSetClasses
+		// rejects a non-string argument outright ("FiberSetClasses param 1
+		// should be String"), confirmed on device — a genuinely native-only
+		// validation this shim's own jsdom-backed test mock never catches,
+		// since ElementPAPI's __SetClasses(e, cls) is just `e.className = cls`
+		// and happily accepts undefined. Found via mithril-lynx-ui's FeedList
+		// (a native-list cell recycled between content that has a "class"
+		// attr and content that doesn't).
+		__SetClasses(this._handle, value == null ? "" : String(value))
 	} else if (key === "id") {
 		__SetID(this._handle, value == null ? null : String(value))
 	} else if (key === "checked") {
@@ -365,7 +373,8 @@ LynxNodeWrapper.prototype._setDirectProp = function (key, value) {
 
 LynxNodeWrapper.prototype.setAttribute = function (key, value) {
 	if (key === "class") {
-		__SetClasses(this._handle, value == null ? undefined : String(value))
+		// See _setDirectProp's own comment above: "" not undefined.
+		__SetClasses(this._handle, value == null ? "" : String(value))
 	} else if (key === "id") {
 		__SetID(this._handle, value == null ? null : String(value))
 	} else if (key.slice(0, 5) === "data-") {
@@ -377,7 +386,8 @@ LynxNodeWrapper.prototype.setAttribute = function (key, value) {
 
 LynxNodeWrapper.prototype.removeAttribute = function (key) {
 	if (key === "class") {
-		__SetClasses(this._handle, undefined)
+		// See _setDirectProp's own comment above: "" not undefined.
+		__SetClasses(this._handle, "")
 	} else if (key === "id") {
 		__SetID(this._handle, null)
 	} else if (key.slice(0, 5) === "data-") {

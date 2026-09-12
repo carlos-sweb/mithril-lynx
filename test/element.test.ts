@@ -54,6 +54,40 @@ describe("element.js (main-thread ref helpers)", () => {
     expect(lastCallOf("__AddDataset")?.args).toEqual([view._handle, "foo", "bar"]);
   });
 
+  it("clearing class passes an empty string, never undefined/null", () => {
+    // Real hardware's FiberSetClasses rejects a non-string argument outright
+    // ("FiberSetClasses param 1 should be String") — confirmed on device via
+    // mithril-lynx-ui's FeedList, where a native list-item got recycled
+    // between content that has a "class" attr and content that doesn't. The
+    // jsdom-backed test mock (ElementPAPI's __SetClasses is just
+    // `e.className = cls`) happily accepts undefined, so only an explicit
+    // type assertion here — not the mock's own behavior — catches a
+    // regression.
+    const { view } = setupNode();
+    const el = wrapElement(view);
+
+    el.setAttribute("class", "highlighted");
+    el.setAttribute("class", null);
+    expect(lastCallOf("__SetClasses")?.args).toEqual([view._handle, ""]);
+    expect(typeof lastCallOf("__SetClasses")?.args[1]).toBe("string");
+
+    // The two OTHER call sites with the same bug, exercised directly on the
+    // real LynxNodeWrapper rather than through element.js's wrapElement:
+    // LynxNodeWrapper.prototype.removeAttribute (the path Mithril's own
+    // attrs-diffing actually calls when a `class`/`className` attr on an
+    // `m("view", {class: ...})` vnode disappears between renders — see
+    // render.js's removeAttr, `vnode.dom.removeAttribute("class")`) and the
+    // `className` DIRECT_PROPS setter (the `vnode.dom.className = value`
+    // path some other call sites use).
+    view.setAttribute("class", "highlighted");
+    view.removeAttribute("class");
+    expect(lastCallOf("__SetClasses")?.args).toEqual([view._handle, ""]);
+
+    (view as any).className = "highlighted";
+    (view as any).className = null;
+    expect(lastCallOf("__SetClasses")?.args).toEqual([view._handle, ""]);
+  });
+
   it("querySelector/querySelectorAll delegate to __QuerySelector(All) and re-wrap the result", () => {
     const { view } = setupNode();
     const child = view.ownerDocument.createElement("text");

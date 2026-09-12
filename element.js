@@ -39,7 +39,11 @@ export function wrapElement(node) {
 		},
 
 		setAttribute(name, value) {
-			if (name === "class") __SetClasses(handle, value == null ? undefined : String(value));
+			// "" not undefined when clearing: real hardware's FiberSetClasses
+			// rejects a non-string argument ("FiberSetClasses param 1 should be
+			// String") — see lynx-mithril-shim.js's own matching fix for the
+			// same call.
+			if (name === "class") __SetClasses(handle, value == null ? "" : String(value));
 			else if (name === "id") __SetID(handle, value == null ? null : String(value));
 			else if (name.slice(0, 5) === "data-") __AddDataset(handle, name.slice(5), value);
 			else __SetAttribute(handle, name, value == null ? null : value);
