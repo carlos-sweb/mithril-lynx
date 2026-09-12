@@ -696,23 +696,41 @@ function factory() {
 
 	function initComponent(vnode, hooks) {
 		var sentinel
-		if (typeof vnode.tag.view === "function") {
+		var classStyle = typeof vnode.tag.view !== "function"
+		if (!classStyle) {
 			vnode.state = Object.create(vnode.tag)
 			sentinel = vnode.state.view
-			if (sentinel.$$reentrantLock$$ != null) return
-			sentinel.$$reentrantLock$$ = true
 		} else {
-			vnode.state = void 0
 			sentinel = vnode.tag
-			if (sentinel.$$reentrantLock$$ != null) return
-			sentinel.$$reentrantLock$$ = true
-			vnode.state = (vnode.tag.prototype != null && typeof vnode.tag.prototype.view === "function") ? new vnode.tag(vnode) : vnode.tag(vnode)
 		}
-		initLifecycle(vnode.state, vnode, hooks)
-		if (vnode.attrs != null) initLifecycle(vnode.attrs, vnode, hooks)
-		vnode.instance = Vnode.normalize(callHook.call(vnode.state.view, vnode))
-		if (vnode.instance === vnode) throw Error("A view cannot return the vnode it received as argument")
-		sentinel.$$reentrantLock$$ = null
+		if (sentinel.$$reentrantLock$$ != null) return
+		sentinel.$$reentrantLock$$ = true
+		// The lock above is stored on `sentinel` — the component's OWN shared
+		// view function (or, for class-style components, the tag itself), NOT
+		// on this vnode instance — so it's shared by EVERY use of this
+		// component anywhere in the app. Without the try/finally below, a
+		// view() (or, for a class-style component, its CONSTRUCTOR) that
+		// throws on a component's first render (e.g. a fail-loudly validation
+		// error) skips the `sentinel.$$reentrantLock$$ = null` reset entirely,
+		// leaving that lock stuck at `true` forever. Every later attempt to
+		// create that SAME component type — anywhere, not just the one
+		// instance that threw — then silently no-ops right here
+		// (`if (sentinel.$$reentrantLock$$ != null) return`): no render, no
+		// error, nothing. Found via mithril-lynx-ui's own test suite: a
+		// component whose view() deliberately throws to validate a prop,
+		// exercised in one test, made every SUBSEQUENT test mounting that
+		// same component silently render nothing, no matter how unrelated.
+		try {
+			if (classStyle) {
+				vnode.state = (vnode.tag.prototype != null && typeof vnode.tag.prototype.view === "function") ? new vnode.tag(vnode) : vnode.tag(vnode)
+			}
+			initLifecycle(vnode.state, vnode, hooks)
+			if (vnode.attrs != null) initLifecycle(vnode.attrs, vnode, hooks)
+			vnode.instance = Vnode.normalize(callHook.call(vnode.state.view, vnode))
+			if (vnode.instance === vnode) throw Error("A view cannot return the vnode it received as argument")
+		} finally {
+			sentinel.$$reentrantLock$$ = null
+		}
 	}
 
 	function createComponent(parent, vnode, hooks, ns, nextSibling) {

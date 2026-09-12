@@ -1,6 +1,6 @@
 {
   "name": "mithril-lynx",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Mithril.js rendered through Lynx's Element PAPI \u2014 a contract-complete port of mithril/render/render.js@2.3.8 to the Lynx main thread, packaged as a reusable framework.",
   "license": "MIT",
   "type": "module",
