@@ -298,4 +298,12 @@ bun run test
 
 Tests run against `@lynx-js/testing-environment`'s jsdom-backed PAPI polyfill. The polyfill itself is published as `mithril-lynx/testing`'s `installTestingPolyfills()` (see `test/setup.ts` for the one-line setup) — consuming apps can use the exact same polyfill for their own tests instead of maintaining a duplicate copy; see `mithril-app/test/setup.ts` for a worked example.
 
-**Not provided**: Fast Refresh and a devtools/inspector bundle (project plan, Phase 9 / subsystem 12) are explicitly out of scope — they're deep, compiler-driven DX features in upstream ReactLynx with no zero-compiler equivalent worth building. `rspeedy dev`'s existing full-reload-on-file-change loop is the honest substitute.
+**Not provided**: Fast Refresh and a devtools/inspector bundle (project plan, Phase 9 / subsystem 12) are explicitly out of scope — they're deep, compiler-driven DX features in upstream ReactLynx with no zero-compiler equivalent worth building.
+
+In development, `pluginMithrilLynx()` adds a small background-thread client even
+when the app has no `background.ts`. After a successful rebuild it reloads the
+bundle through Lynx Go's `ExplorerModule.openSchema()`, rather than attempting
+module HMR (Mithril views run in the separate main-thread/Lepus bundle). This
+is intentionally a **Lynx Go viewer** convenience, not a portable SDK API: a
+different viewer or a final native host that does not provide `ExplorerModule`
+will log a warning and must be reloaded manually.

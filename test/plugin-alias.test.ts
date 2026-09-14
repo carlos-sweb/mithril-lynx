@@ -13,15 +13,17 @@ import { pluginMithrilLynx } from "../plugin.js";
 // for `mithril` itself.
 
 /** Minimal ChainConfig stand-in: records aliases, no entries configured. */
-function stubChain() {
+function stubChain(entries: Record<string, unknown> = {}) {
   const aliases = new Map<string, string>();
   const used: string[] = [];
+  const addedEntries = new Map<string, unknown>();
   return {
     aliases,
     used,
     resolve: { alias: { set: (k: string, v: string) => aliases.set(k, v) } },
-    entryPoints: { entries: () => ({}), clear: () => {} },
-    entry: () => ({ add: () => {} }),
+    addedEntries,
+    entryPoints: { entries: () => entries, clear: () => {} },
+    entry: (name: string) => ({ add: (value: unknown) => addedEntries.set(name, value) }),
     plugin: (name: string) => {
       used.push(name);
       return { use: () => {} };
@@ -29,16 +31,26 @@ function stubChain() {
   };
 }
 
-function runPlugin() {
-  const chain = stubChain();
+function runPlugin({
+  isDev = false,
+  entries,
+  context = {},
+}: {
+  isDev?: boolean;
+  entries?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+} = {}) {
+  const chain = stubChain(entries);
   let modify: ((c: unknown) => void) | undefined;
   pluginMithrilLynx().setup({
     expose: () => {},
+    modifyRsbuildConfig: () => {},
     modifyBundlerChain: (fn: (c: unknown) => void) => {
       modify = fn;
     },
+    context,
   } as never);
-  modify?.(chain);
+  modify?.(chain, { isDev, environment: { config: {} } });
   return chain;
 }
 
@@ -68,5 +80,25 @@ describe("pluginMithrilLynx: single-copy aliasing", () => {
 
   it("still pins mithril itself, which has the same failure mode", () => {
     expect(runPlugin().aliases.get("mithril")).toBeDefined();
+  });
+
+  it("puts the ExplorerModule reload client in a synthetic dev background entry", () => {
+    const source = "/tmp/mithril-live-reload/main-thread.ts";
+    const { addedEntries } = runPlugin({
+      isDev: true,
+      context: { devServer: { hostname: "192.0.2.10", port: 3100 } },
+      entries: { main: { values: () => [{ import: source }] } },
+    });
+
+    // Imported by its resolved absolute path (plus a query string), not
+    // through a "mithril-lynx/..." bare specifier + alias: the package's own
+    // broader "mithril-lynx" resolve alias (registered earlier, for the
+    // single-copy fix above) matches that specifier first regardless of
+    // registration order, which broke the import entirely.
+    const backgroundEntry = addedEntries.get("main__background") as { import: string[]; filename: string };
+    expect(backgroundEntry.filename).toBe(".rspeedy/main/background.js");
+    expect(backgroundEntry.import).toHaveLength(1);
+    expect(backgroundEntry.import[0]).toContain("src/dev-reload-client.js?");
+    expect(backgroundEntry.import[0]).toContain("bundle-url=http%3A%2F%2F192.0.2.10%3A3100%2Fmain.bundle");
   });
 });
