@@ -1,5 +1,20 @@
 # Live reload plan
 
+## Resolution (2026-09-14)
+
+**Shipped in `mithril-lynx@0.0.7`.** The plan below (Steps 1-5) was implemented
+as designed and verified end-to-end on real hardware — four consecutive source
+edits, each auto-reloading with no manual re-navigation. Two real bugs were
+found and fixed along the way (an unresolved `assetPrefix` placeholder feeding
+`new URL()`, and a resolve-alias collision that broke the client's own
+import), plus a socket-lifecycle bug (every earlier reload's WebSocket was
+left open, so a build a few reloads in fired `ExplorerModule.openSchema` once
+per still-open stale socket and the resulting reloads raced each other) — see
+`src/dev-reload-client.js`'s comments and the commit history for detail.
+
+**New known issue, found after shipping**: see "Known issue: stale Activity
+stack on Back" near the end of this document. Not yet fixed.
+
 ## Problem recap
 
 Apps built with `mithril-lynx` (via `pluginMithrilLynx()` in `lynx.config.ts`) don't
@@ -218,3 +233,72 @@ registrations), since `invokeCdp('Page.reload')` is confirmed dead-end (#5).
   user overrides `output.filename` or serves behind a proxy/`assetPrefix` — worth
   a quick sanity check against `pluginQRCode`'s own URL-construction logic
   (already in this same file, already handles this correctly for the QR flow).
+
+## Known issue: stale Activity stack on Back (found 2026-09-14, not fixed)
+
+**Symptom** (reported by the user after the live-reload fix above shipped and
+was verified working): the reload itself is correct — the visible content
+always ends up matching the latest source edit — but the *previous* bundle
+load is never torn down. Pressing the phone's Back button doesn't return to
+Lynx Go's scan/URL-entry home screen the way it does after a single normal
+load; it steps back through one stale, frozen snapshot of the app per
+previous reload before eventually reaching home.
+
+**Evidence gathered** (same real device, `adb shell dumpsys activity
+activities`):
+
+- After the *initial* QR-scan load (before any edits), the task already
+  contains **two** stacked `LynxViewShellActivity` instances (`Hist #0`,
+  `Hist #1`) — the QR-scan flow itself is not activity-count-neutral, likely
+  one for the scanner UI and one for the loaded bundle, though this wasn't
+  investigated further.
+- After one source edit (one live-reload cycle), the stack grew to **four**
+  instances (`Hist #0`-`#3`) — two more `LynxViewShellActivity` entries added
+  for a single reload.
+- After a second edit, the stack grew to **five** (`Hist #0`-`#4`) — one more
+  entry this time. (Growing by 2 then by 1 across two otherwise-identical
+  reloads is itself unexplained — not investigated further; possibly a
+  one-off from the QR-scan flow's own activity, or a timing-dependent Explorer
+  behavior.)
+- Pressing Back once from the "five" state landed on a screen showing
+  `PRUEBA 12 - reload 5` — the exact text set two edits earlier, i.e. a
+  genuinely frozen prior `LynxView` instance, not the home screen.
+
+**Likely cause (not yet confirmed against Lynx Go's own source)**: earlier in
+this investigation, starting Lynx Go's `LynxViewShellActivity` via `adb shell
+am start` was observed in logcat with the `LAUNCH_MULTIPLE` intent flag
+(`flg=0x10000000`) and an `ActivityManager` result of `START_TASK_TO_FRONT`
+(`result code=3`) rather than `START_SUCCESS`. If `ExplorerModule.openSchema`
+starts its new `LynxViewShellActivity` the same way — `LAUNCH_MULTIPLE`, no
+`FLAG_ACTIVITY_CLEAR_TOP`, and never calling `finish()` on the activity making
+the call — every reload would push a new instance onto the back stack by
+design, exactly matching what's observed. This would be **native, Lynx-Go-side
+behavior**, not something `mithril-lynx`'s own JS code controls — the
+dev-reload-client only ever calls `NativeModules.ExplorerModule.openSchema(url)`
+once per successful rebuild (confirmed separately: exactly one `openSchema`
+call per edit, no duplicate-fire — see the socket-lifecycle fix above), so the
+stacking is happening entirely on the native side of that call, not from a
+duplicate JS-side invocation.
+
+**Not yet tried**:
+- Grep Lynx Go's own APK / `lynx-devtool`'s source for `ExplorerModule`'s
+  actual Android implementation, to confirm the `LAUNCH_MULTIPLE`/no-`finish()`
+  hypothesis rather than assuming it.
+- Check whether `ExplorerModule` exposes a second method, or an options
+  argument to `openSchema`, that replaces the current activity instead of
+  stacking a new one (e.g. something equivalent to
+  `FLAG_ACTIVITY_CLEAR_TOP`/`FLAG_ACTIVITY_SINGLE_TOP`).
+- If no such option exists, whether some *other* Native Module call
+  (available from JS) can `finish()` the activity that's about to be replaced
+  — called right before `openSchema`, from `dev-reload-client.js`.
+- Whether this is specific to this Lynx Go build/version, or true of the
+  official viewer generally.
+
+**Impact / workaround for now**: purely a dev-session ergonomics issue, not a
+correctness bug — the app always shows current content, and the stacked
+activities are cheap frozen views, not leaking sockets or timers (each old
+bundle's own dev-reload-client already closed its own socket before the
+reload that superseded it, per the fix above). Users doing many edits in one
+session should be aware Back will step through several stale screens before
+reaching Lynx Go's home screen, and can use "recent apps" → close, or
+force-stop the app, to reset the stack instead.

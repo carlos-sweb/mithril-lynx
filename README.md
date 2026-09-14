@@ -307,3 +307,12 @@ module HMR (Mithril views run in the separate main-thread/Lepus bundle). This
 is intentionally a **Lynx Go viewer** convenience, not a portable SDK API: a
 different viewer or a final native host that does not provide `ExplorerModule`
 will log a warning and must be reloaded manually.
+
+**Known issue**: each reload leaves the *previous* load's Activity on Lynx
+Go's back stack instead of replacing it (verified via `adb shell dumpsys
+activity activities` — likely `openSchema`'s own native implementation, not
+something under this package's control). The visible content is always
+correct, but pressing Back steps through one stale, frozen screen per earlier
+reload before reaching Lynx Go's home screen. See `LIVE_RELOAD_PLAN.md`'s
+"Known issue: stale Activity stack on Back" for the full writeup. Workaround:
+close the app from Recents (or force-stop it) to reset the stack.
