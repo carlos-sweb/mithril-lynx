@@ -31,26 +31,21 @@ function stubChain(entries: Record<string, unknown> = {}) {
   };
 }
 
-function runPlugin({
-  isDev = false,
-  entries,
-  context = {},
-}: {
-  isDev?: boolean;
-  entries?: Record<string, unknown>;
-  context?: Record<string, unknown>;
-} = {}) {
+function runPlugin({ entries }: { entries?: Record<string, unknown> } = {}) {
   const chain = stubChain(entries);
   let modify: ((c: unknown) => void) | undefined;
   pluginMithrilLynx().setup({
     expose: () => {},
     modifyRsbuildConfig: () => {},
+    // Live reload itself (reloadViaDevtool(), registered here) runs from the
+    // Node dev-server process against a real device connection — out of
+    // scope for this file's plugin-config-level assertions.
+    onAfterDevCompile: () => {},
     modifyBundlerChain: (fn: (c: unknown) => void) => {
       modify = fn;
     },
-    context,
   } as never);
-  modify?.(chain, { isDev, environment: { config: {} } });
+  modify?.(chain);
   return chain;
 }
 
@@ -82,23 +77,16 @@ describe("pluginMithrilLynx: single-copy aliasing", () => {
     expect(runPlugin().aliases.get("mithril")).toBeDefined();
   });
 
-  it("puts the ExplorerModule reload client in a synthetic dev background entry", () => {
+  it("adds no background entry for an app with no background.ts, even though live reload is on", () => {
+    // Live reload runs from the Node dev-server process against a real
+    // DevTool connection (see reloadViaDevtool() in plugin.js) rather than
+    // from a chunk bundled into the app, so there's no reason for this
+    // entry-construction step to synthesize one anymore.
     const source = "/tmp/mithril-live-reload/main-thread.ts";
     const { addedEntries } = runPlugin({
-      isDev: true,
-      context: { devServer: { hostname: "192.0.2.10", port: 3100 } },
       entries: { main: { values: () => [{ import: source }] } },
     });
 
-    // Imported by its resolved absolute path (plus a query string), not
-    // through a "mithril-lynx/..." bare specifier + alias: the package's own
-    // broader "mithril-lynx" resolve alias (registered earlier, for the
-    // single-copy fix above) matches that specifier first regardless of
-    // registration order, which broke the import entirely.
-    const backgroundEntry = addedEntries.get("main__background") as { import: string[]; filename: string };
-    expect(backgroundEntry.filename).toBe(".rspeedy/main/background.js");
-    expect(backgroundEntry.import).toHaveLength(1);
-    expect(backgroundEntry.import[0]).toContain("src/dev-reload-client.js?");
-    expect(backgroundEntry.import[0]).toContain("bundle-url=http%3A%2F%2F192.0.2.10%3A3100%2Fmain.bundle");
+    expect(addedEntries.has("main__background")).toBe(false);
   });
 });

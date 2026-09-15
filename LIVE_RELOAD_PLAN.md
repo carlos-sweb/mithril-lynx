@@ -10,10 +10,66 @@ found and fixed along the way (an unresolved `assetPrefix` placeholder feeding
 import), plus a socket-lifecycle bug (every earlier reload's WebSocket was
 left open, so a build a few reloads in fired `ExplorerModule.openSchema` once
 per still-open stale socket and the resulting reloads raced each other) — see
-`src/dev-reload-client.js`'s comments and the commit history for detail.
+the commit history for detail. (That file was deleted again in 0.0.8; the
+whole in-bundle client is gone, see the second pass below.)
 
-**New known issue, found after shipping**: see "Known issue: stale Activity
-stack on Back" near the end of this document. Not yet fixed.
+**New known issue, found after shipping**: each reload left the previous load's
+Activity on Lynx Go's back stack. Fixed in the second pass below — shipped in
+`mithril-lynx@0.0.8`.
+
+## Resolution (second pass): the stale Activity stack
+
+**Shipped in `mithril-lynx@0.0.8`.** `ExplorerModule.openSchema(url)` is a real
+navigation, so every reload started a new `LynxViewShellActivity` and never
+finished the one it replaced. The reload now goes through
+`@lynx-js/devtool-connector` instead, from the Node dev-server process, and
+sends CDP `Page.reload` to the session serving this app's bundle. `Page.reload`
+reloads the existing page in place — the DevTools reference notes the session
+URL is unchanged after it — so nothing new lands on the back stack. The
+in-bundle client (`src/dev-reload-client.js`) and the synthetic background
+entry it needed are both gone; entries only get a background chunk when the app
+has its own `background.ts` again.
+
+Three things worth recording, because none of them is obvious:
+
+- **This makes adb a requirement for live reload.** The DevTool connector talks
+  to the adb server (it sets up an adb reverse tunnel to the device's
+  DebugRouter), so `npm run dev` and QR-scanning still work over Wi-Fi but the
+  automatic reload does not. The previous `openSchema` path needed no adb at
+  all — that capability was traded away deliberately, because it was the same
+  mechanism that corrupted the back stack. Wireless debugging
+  (`adb connect <ip>:5555`) covers this without a cable.
+- **Session selection is a real correctness problem, not a detail.** Lynx Go's
+  own shell page (`homepage.lynx.bundle`) is itself a Lynx session and is
+  usually the newest one, and a second Lynx app or a second attached device can
+  also be newer than ours. So `pickReloadTarget()` filters out non-`lynx` and
+  shell sessions, prefers a session whose URL matches one of this app's
+  `<entry>.bundle` names, and only then falls back to the highest
+  `session_id`. It is pure and unit-tested (`test/dev-reload-target.test.ts`)
+  precisely because it cannot be exercised without hardware.
+- **`Page.reload` alone silently replays the PREVIOUS bundle.** This one nearly
+  shipped as a "working" fix: the reload succeeded, the Activity count stayed
+  flat, logcat showed a real `TemplateAssembler::LoadTemplate` and
+  `onFirstScreen` — and the old text stayed on screen. The loaded template was
+  byte-for-byte the previous build (52713 vs the server's 52701 — a 12-byte
+  difference, exactly the length of the edited string), and `ignoreCache: true`
+  did not help, which is also all the official
+  `@lynx-js/webpack-dev-transport` client passes. Both the HTTP layer and Lynx's
+  own bytecode cache key on the URL, so the fix is `cacheBustedUrl()`: append a
+  `?t=<timestamp>` to the reload URL. The session's own URL does not change
+  (verified: it still reads `.../main-thread.bundle` afterwards), so this does
+  not turn the reload into a navigation.
+
+**Verified end-to-end** on the Galaxy A07 (`adb reverse tcp:3001 tcp:3001` to
+reach the dev server, bundle loaded into Lynx Go via `lynx://open?url=…`):
+baseline 1 `LynxViewShellActivity`, then four consecutive source edits, each
+reloading in place with the new text on screen and the Activity count still
+**1** — and one Back press from the final state exits to the launcher instead
+of walking back through frozen snapshots. The negative path was exercised too:
+with the app closed before a rebuild, the dev server logs the "no Lynx session
+found" warning and keeps building, rather than failing.
+
+The original diagnosis is preserved below.
 
 ## Problem recap
 
@@ -234,7 +290,13 @@ registrations), since `invokeCdp('Page.reload')` is confirmed dead-end (#5).
   a quick sanity check against `pluginQRCode`'s own URL-construction logic
   (already in this same file, already handles this correctly for the QR flow).
 
-## Known issue: stale Activity stack on Back (found 2026-09-14, not fixed)
+## Resolved: stale Activity stack on Back
+
+**Status: fixed in `mithril-lynx@0.0.8`** — see "Resolution (second pass)"
+above for the mechanism. The diagnosis below is kept as the record of how it
+was traced; the "Not yet tried" list at the end is what the fix ended up
+resolving, by removing `openSchema` from the picture entirely rather than by
+finding a flag to stop it stacking.
 
 **Symptom** (reported by the user after the live-reload fix above shipped and
 was verified working): the reload itself is correct — the visible content

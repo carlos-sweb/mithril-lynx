@@ -300,19 +300,27 @@ Tests run against `@lynx-js/testing-environment`'s jsdom-backed PAPI polyfill. T
 
 **Not provided**: Fast Refresh and a devtools/inspector bundle (project plan, Phase 9 / subsystem 12) are explicitly out of scope — they're deep, compiler-driven DX features in upstream ReactLynx with no zero-compiler equivalent worth building.
 
-In development, `pluginMithrilLynx()` adds a small background-thread client even
-when the app has no `background.ts`. After a successful rebuild it reloads the
-bundle through Lynx Go's `ExplorerModule.openSchema()`, rather than attempting
-module HMR (Mithril views run in the separate main-thread/Lepus bundle). This
-is intentionally a **Lynx Go viewer** convenience, not a portable SDK API: a
-different viewer or a final native host that does not provide `ExplorerModule`
-will log a warning and must be reloaded manually.
+In development, `pluginMithrilLynx()` reloads the running page after every
+successful rebuild instead of attempting module HMR — Mithril view code runs in
+the main-thread/Lepus bundle, and rspack's hot runtime can only patch modules on
+the background thread, so HMR could never reach it. (No synthetic background
+entry is created for this: the reload runs from the dev-server process, not from
+a chunk inside the app.)
 
-**Known issue**: each reload leaves the *previous* load's Activity on Lynx
-Go's back stack instead of replacing it (verified via `adb shell dumpsys
-activity activities` — likely `openSchema`'s own native implementation, not
-something under this package's control). The visible content is always
-correct, but pressing Back steps through one stale, frozen screen per earlier
-reload before reaching Lynx Go's home screen. See `LIVE_RELOAD_PLAN.md`'s
-"Known issue: stale Activity stack on Back" for the full writeup. Workaround:
-close the app from Recents (or force-stop it) to reset the stack.
+The reload goes through the Lynx DevTool connector and sends CDP `Page.reload`
+to the session currently serving your bundle. That reloads the existing page
+**in place**, so nothing is pushed onto the viewer's back stack. Two consequences
+worth knowing:
+
+- **Live reload reaches the device over adb, not over the LAN.** The DevTool
+  connector talks to the adb server (it sets up an adb reverse tunnel to the
+  device's DebugRouter). `npm run dev` and the QR-scan flow are unaffected and
+  still work over Wi-Fi — only the automatic reload needs adb. With no adb
+  connection the rebuild logs a warning and you reload by hand. Wireless
+  debugging (`adb connect <ip>:5555`) satisfies this with no cable, and
+  `ANDROID_SERIAL` picks the device when several are attached.
+- It is a **dev-server convenience, not a portable SDK API**: the connector is
+  imported lazily by a dev rebuild only, and no reload code is bundled into the
+  app in any build.
+
+Turn it off with `pluginMithrilLynx({ liveReload: false })`.

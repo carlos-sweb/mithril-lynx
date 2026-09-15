@@ -5,6 +5,7 @@
     "": {
       "name": "mithril-lynx",
       "dependencies": {
+        "@lynx-js/devtool-connector": "^0.13.2",
         "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4",
         "@lynx-js/template-webpack-plugin": "^0.16.0",
       },
@@ -87,6 +88,8 @@
     "@lynx-js/debug-metadata": ["@lynx-js/debug-metadata@0.1.0", "", { "bin": { "debug-metadata": "./dist/cli.js" } }, "sha512-3N+Wgc/kIc4/aG5KpdPWKsC9MsNngygeyg9JS6IOayS8AQJ37xjVEzlz1U3aYzT9al0RJKL7w4poa0tGaXBv1g=="],
 
     "@lynx-js/debug-metadata-rsbuild-plugin": ["@lynx-js/debug-metadata-rsbuild-plugin@0.2.2", "", { "dependencies": { "@lynx-js/debug-metadata": "^0.1.0" }, "peerDependencies": { "@rsbuild/core": "^2.0.0" }, "optionalPeers": ["@rsbuild/core"] }, "sha512-0/HohqP1Z4uCaDExvYOreITIuSscSf0ZNkz+gtPF4/xr00LVELY9bq+2UeBjWFsQeFGyC7vtW7GrT/aVZxKpWQ=="],
+
+    "@lynx-js/devtool-connector": ["@lynx-js/devtool-connector@0.13.2", "", { "dependencies": { "jpeg-js": "^0.4.4", "obug": "^2.1.3", "semver": "^7.7.3", "ws": "^8.21.0" } }, "sha512-7NXFJFogGJAOQmIk4x95Ef9b9JbBJK5J5xviDF5OWmOeW+ZiSfCAALUMwRUlU9nXPMeH/rdtT3Kis0QtV4WDfA=="],
 
     "@lynx-js/rsbuild-plugin": ["@lynx-js/rsbuild-plugin@0.1.1", "", { "dependencies": { "@lynx-js/cache-events-webpack-plugin": "^0.2.1", "@lynx-js/chunk-loading-webpack-plugin": "^0.4.2", "@lynx-js/debug-metadata-rsbuild-plugin": "^0.2.2", "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4", "@lynx-js/template-webpack-plugin": "^0.16.0", "@lynx-js/web-rsbuild-server-middleware": "0.26.0", "@lynx-js/webpack-dev-transport": "^0.4.0", "@lynx-js/websocket": "^0.0.4", "@rsbuild/plugin-css-minimizer": "2.0.1" }, "peerDependencies": { "@rsbuild/core": "^2.0.0" }, "optionalPeers": ["@rsbuild/core"] }, "sha512-sPWtmkMRmaT8Q+JNfgRKMTo1DgxLtbSJfEB1/qna9oXd15+WEUxZbBMpgXW+d3wnzAXfZsK338725L3BTebIiA=="],
 
@@ -546,6 +549,8 @@
 
     "jest-worker": ["jest-worker@30.5.1", "", { "dependencies": { "@types/node": "*", "@ungap/structured-clone": "^1.3.0", "jest-util": "30.5.1", "merge-stream": "^2.0.0", "supports-color": "^8.1.1" } }, "sha512-Cbxh5v7AoLuFRmFJSM4/aHdQ68rjXvUWr716EE0Dh3I7T+T/3FgFKhOERGXHcU2Meftq9+9zxPM3TSNyI9D+HA=="],
 
+    "jpeg-js": ["jpeg-js@0.4.4", "", {}, "sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg=="],
+
     "js-tokens": ["js-tokens@4.0.0", "", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 
     "jsdom": ["jsdom@28.1.0", "", { "dependencies": { "@acemir/cssom": "^0.9.31", "@asamuzakjp/dom-selector": "^6.8.1", "@bramus/specificity": "^2.4.2", "@exodus/bytes": "^1.11.0", "cssstyle": "^6.0.1", "data-urls": "^7.0.0", "decimal.js": "^10.6.0", "html-encoding-sniffer": "^6.0.0", "http-proxy-agent": "^7.0.2", "https-proxy-agent": "^7.0.6", "is-potential-custom-element-name": "^1.0.1", "parse5": "^8.0.0", "saxes": "^6.0.0", "symbol-tree": "^3.2.4", "tough-cookie": "^6.0.0", "undici": "^7.21.0", "w3c-xmlserializer": "^5.0.0", "webidl-conversions": "^8.0.1", "whatwg-mimetype": "^5.0.0", "whatwg-url": "^16.0.0", "xml-name-validator": "^5.0.0" }, "peerDependencies": { "canvas": "^3.0.0" }, "optionalPeers": ["canvas"] }, "sha512-0+MoQNYyr2rBHqO1xilltfDjV9G7ymYGlAUazgcDLQaUf8JDHbuGwsxN6U9qWaElZ4w1B2r7yEGIL3GdeW3Rug=="],
@@ -609,6 +614,8 @@
     "object.assign": ["object.assign@4.1.7", "", { "dependencies": { "call-bind": "^1.0.8", "call-bound": "^1.0.3", "define-properties": "^1.2.1", "es-object-atoms": "^1.0.0", "has-symbols": "^1.1.0", "object-keys": "^1.1.1" } }, "sha512-nK28WOo+QIjBkDduTINE4JkF/UJJKyf2EJxvJKfblDpyg0Q+pkOHNTL0Qwy6NP6FhE/EnzV73BxxqcJaXY9anw=="],
 
     "object.groupby": ["object.groupby@1.0.3", "", { "dependencies": { "call-bind": "^1.0.7", "define-properties": "^1.2.1", "es-abstract": "^1.23.2" } }, "sha512-+Lhy3TQTuzXI5hevh8sBGqbmurHbbIjAi0Z4S63nthVLmLxfbj4T54a4CfZrXIrt9iP4mVAPYMo/v99taj3wjQ=="],
+
+    "obug": ["obug@2.2.1", "", {}, "sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q=="],
 
     "own-keys": ["own-keys@1.0.2", "", { "dependencies": { "call-bound": "^1.0.4", "get-intrinsic": "^1.3.0", "object-keys": "^1.1.1", "safe-push-apply": "^1.0.0" } }, "sha512-19YVAg7T+WTrxggPukVq7DjTv6+PJ867TmhCvBsYwmbFCsZd344rq2Ld1p0wo8f8Qrrhgp82c6FJRqdXWtSEhg=="],
 
