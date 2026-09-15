@@ -60,14 +60,29 @@ Three things worth recording, because none of them is obvious:
   (verified: it still reads `.../main-thread.bundle` afterwards), so this does
   not turn the reload into a navigation.
 
-**Verified end-to-end** on the Galaxy A07 (`adb reverse tcp:3001 tcp:3001` to
-reach the dev server, bundle loaded into Lynx Go via `lynx://open?url=…`):
-baseline 1 `LynxViewShellActivity`, then four consecutive source edits, each
-reloading in place with the new text on screen and the Activity count still
-**1** — and one Back press from the final state exits to the launcher instead
-of walking back through frozen snapshots. The negative path was exercised too:
-with the app closed before a rebuild, the dev server logs the "no Lynx session
-found" warning and keeps building, rather than failing.
+**Verified end-to-end** on the Galaxy A07, in the flow the bug was actually
+reported from: Lynx Go opened normally to its own home screen, then the bundle
+loaded by typing the dev-server URL into the "Bundle URL" field and tapping Go
+(the home screen stays underneath, and both show up as sessions —
+`homepage.lynx.bundle` and our `.../main-thread.bundle`).
+
+Baseline: **2** stacked `LynxViewShellActivity` (home + bundle) — the same
+starting point the original report described. Then three consecutive source
+edits, each reloading in place with the new text on screen and the Activity
+count still **2**, where the old `openSchema` path would have reached 5. One
+Back press from the final state lands on Lynx Go's home screen, with our bundle
+session gone and only `homepage.lynx.bundle` left — not on a frozen earlier
+snapshot, and not out of the app.
+
+Worth recording so this is not misread again: an earlier run of this test
+launched the bundle via `lynx://open?url=…` from a force-stopped app, which
+leaves no home screen in the stack — there, Back exits to the launcher. That is
+an artifact of the deep-link launch, not the behaviour being fixed; the
+home-underneath run above is the one that reproduces the user's report.
+
+The negative path was exercised too: with the app closed before a rebuild, the
+dev server logs the "no Lynx session found" warning and keeps building, rather
+than failing.
 
 The original diagnosis is preserved below.
 
