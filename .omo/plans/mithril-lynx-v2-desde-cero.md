@@ -1,12 +1,15 @@
 # Plan — mithril-lynx v2: reescritura completa, redraw automático, 3 modos de reload
 
-> Estado (2026-09-17): **F0, F1 y F2 completados y verificados con
-> `rstest` (no mocks — PAPI real vía `@lynx-js/testing-environment`).**
-> F3–F6 pendientes (necesitan build real + device). Código en
-> `mithril-lynx-v2/src/`, commit inicial `87c1a36`, git local (sin remoto).
-> Ver §8 al final de este documento para el detalle exacto de qué quedó
-> hecho, con evidencia. Idioma: español (consistente con el resto de planes
-> de este proyecto).
+> Estado (2026-09-17): **F0–F4 completados y verificados — F0–F2 con
+> `rstest` (PAPI real vía `@lynx-js/testing-environment`, sin mocks), F3–F4
+> además en un device Android real conectado (`adb R8YYC0VV0PV`), con una
+> app de prueba nueva (`mithril-lynx-v2-app`, hermana de este repo).** Los
+> 3 modos de reload (datos, estructural, full) y el auto-redraw de F1
+> quedaron confirmados con trazas y un dump de `uiautomator`, no solo con
+> capturas de pantalla. F5 (cruce con Lynx DevTool) y F6 (empaquetado tipo
+> `create-mithril-lynx-v2`) quedan pendientes. Ver §8 al final de este
+> documento para el detalle exacto y la evidencia cruda de cada fase.
+> Idioma: español (consistente con el resto de planes de este proyecto).
 >
 > Decisión del usuario (2026-09-17): v2 se escribe en un directorio hermano
 > nuevo, `mithril-lynx-v2/`, **no** dentro de `mithril-lynx/`. Motivo textual:
@@ -426,11 +429,74 @@ un error en vez de fallar en silencio, porque no hay todavía una llamada
 PAPI de "limpiar todos los estilos de una vez" validada. Bloqueante solo
 si una app usa ese patrón exacto; no bloquea F3.
 
-### F3–F6 — pendientes
+### F3 y F4 — cerrados, verificados en device real (2026-09-17, misma sesión)
 
-Necesitan una app real construida contra `mithril-lynx-v2` (scaffold
-nuevo o adaptar `mithril-app-final`), el fix de regex de F0.2 aplicado en
-un `plugin.js` de v2 (todavía no escrito), y el device conectado
-(`R8YYC0VV0PV`, confirmado disponible por `adb devices` en esta sesión)
-para F3 (reload A+C), F4 (reload B + foco), F5 (DevTool). Este es el
-siguiente bloque de trabajo concreto — no iniciado en esta sesión.
+Se construyó `mithril-lynx-v2-app` (repo git propio, hermano de éste),
+esqueleto igual a `mithril-app-final` pero apuntando a las APIs de v2
+(`mithril-lynx-v2/background`, `/main-thread`, `/plugin`). `npm run build`
+compiló sin errores; `npx rspeedy dev` levantó el dev server en
+`10.49.37.154:3000` (misma subred Wi-Fi que el device, `10.49.37.79`,
+confirmado con `adb shell ip -f inet addr show`). Se abrió el bundle en
+Lynx Go vía `adb shell am start -a android.intent.action.VIEW -d
+"lynx://open?url=<bundle-url-encoded>" com.funcs.io.lynx.go` (deep link
+del propio Lynx Go, sin necesidad de escanear el QR a mano).
+
+**F1 en device real** (no solo en `rstest`): `adb shell input tap <título>`
+→ el título cambió de azul a rojo. `index.ts`'s `ontap` no llama
+`redraw()`/`m.redraw()` en ningún lado — la app entera confía en el
+auto-redraw de Mithril, exactamente el mecanismo que estaba roto en v1.
+
+**F3 (reload A — datos), 3 ediciones en vivo de `src/index.ts` (texto del
+título)**: cada guardado produjo en logcat
+`:4 hmr-check hotStatus:"idle"` → `:5 hmr-check-calling` → `:6
+hmr-check-resolved updatedModulesLength:1` — **sin** `:7`/`:8`/`:9`
+(ningún full reload). El input, previamente enfocado con `adb shell input
+tap` + `input text "abc123"`, mantuvo el texto y el teclado abierto en las
+3 ediciones (confirmado por captura de pantalla en cada paso).
+
+**F4 (reload B — estructural), la prueba que v1 nunca llegó a plantear**:
+con el input todavía enfocado y con `abc123` escrito, se agregó un nodo
+`m("text", {key:"extra"}, "NUEVO NODO F4")` HERMANO del input (entre el
+título y el input) y se guardó. Logcat: mismo camino ligero
+(`:4`→`:5`→`:6 updatedModulesLength:1`), sin full reload. **Verificación
+dura, no solo visual**: `adb shell uiautomator dump` después del cambio
+muestra el `EditText` real con
+`text="abc123" ... focused="true"` — el nodo nuevo se insertó, el título
+cambió, y el input ni perdió el foco ni el texto. Esto confirma en
+device real la hipótesis del §3.6 (reusar el diff normal de Mithril con
+`key` estables alcanza para esto), no solo en el test automatizado
+(`test/structural-reload.test.ts`).
+
+**F3 (fallback full reload — método C)**: se editó `src/background.ts`
+(un módulo que NINGÚN `module.hot.accept` cubre — ni siquiera un
+self-accept). Logcat: `:4`→`:5`→**`:7 hmr-check-rejected` "Aborted because
+./src/background.ts is not accepted"** → `:8 reload-called` → `:9
+cdp-page-reload` → reboot limpio (`:0`→`:1`→`:3a`), un solo ciclo, sin
+loop, estado de la app reseteado (el input volvió al placeholder vacío —
+comportamiento correcto y esperado de un full reload).
+
+**Los 3 métodos de reload y el auto-redraw de F1 quedan así confirmados
+end-to-end en device real**, con trazas de logcat y un dump de
+`uiautomator` como evidencia dura — no solo con capturas de pantalla ni
+con tests automatizados. Ver el commit `c788572` de
+`mithril-lynx-v2-app` (mensaje del commit incluye el resumen completo de
+esta corrida) y el commit `f449aa6` de este repo (dev-reload-client.js,
+channel.js, main-thread.js, plugin.js con el fix de F0.2 ya aplicado y
+validado — el hot-update chunk se sirvió y evaluó sin el error
+`ReferenceError: exports is not defined` de v1, en ningún momento de la
+sesión, sin ningún monkey-patch de `lynx.requireModuleAsync`).
+
+### F5–F6 — pendientes
+
+- **F5** (cruce con Lynx DevTool): inspeccionar el árbol de elementos en
+  vivo durante los 3 modos de reload con el DevTool conectado, para
+  confirmar 0 elementos huérfanos/duplicados — no se hizo en esta sesión
+  (se usó `uiautomator`/`adb logcat` como evidencia, suficiente para F3/F4
+  pero no reemplaza la inspección de árbol que DevTool da).
+- **F6** (empaquetado): no hay todavía un `create-mithril-lynx-v2` — cada
+  app nueva tendría que copiarse a mano desde `mithril-lynx-v2-app` como
+  referencia. Tampoco se implementó `module.hot.decline()` explícito para
+  cambios estructurales "duros" (el fallback a full reload ya sale solo
+  cuando `module.hot.check()` no puede propagar la actualización, como se
+  vio en la prueba de método C — un `decline()` explícito solo agregaría
+  un mensaje de log más claro, no cambia el comportamiento).
