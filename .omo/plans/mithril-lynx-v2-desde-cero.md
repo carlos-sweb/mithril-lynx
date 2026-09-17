@@ -1,15 +1,16 @@
 # Plan — mithril-lynx v2: reescritura completa, redraw automático, 3 modos de reload
 
-> Estado (2026-09-17): **F0–F4 completados y verificados — F0–F2 con
-> `rstest` (PAPI real vía `@lynx-js/testing-environment`, sin mocks), F3–F4
-> además en un device Android real conectado (`adb R8YYC0VV0PV`), con una
-> app de prueba nueva (`mithril-lynx-v2-app`, hermana de este repo).** Los
-> 3 modos de reload (datos, estructural, full) y el auto-redraw de F1
-> quedaron confirmados con trazas y un dump de `uiautomator`, no solo con
-> capturas de pantalla. F5 (cruce con Lynx DevTool) y F6 (empaquetado tipo
-> `create-mithril-lynx-v2`) quedan pendientes. Ver §8 al final de este
-> documento para el detalle exacto y la evidencia cruda de cada fase.
-> Idioma: español (consistente con el resto de planes de este proyecto).
+> Estado (2026-09-17): **Plan completo, F0–F6 hechos y verificados.**
+> F0–F2 con `rstest` (PAPI real vía `@lynx-js/testing-environment`, sin
+> mocks). F3–F5 en un device Android real conectado (`adb R8YYC0VV0PV`),
+> con una app de prueba (`mithril-lynx-v2-app`) — los 3 modos de reload y
+> el auto-redraw de F1 confirmados con trazas de logcat, un dump de
+> `uiautomator`, Y una inspección de árbol por CDP vía Lynx DevTool
+> (`agent-lynx`) — tres instrumentos independientes, mismo resultado. F6
+> (`create-mithril-lynx-v2`) probado generando un proyecto nuevo desde cero
+> y compilándolo. Ver §8 al final de este documento para el detalle exacto
+> y la evidencia cruda de cada fase. Idioma: español (consistente con el
+> resto de planes de este proyecto).
 >
 > Decisión del usuario (2026-09-17): v2 se escribe en un directorio hermano
 > nuevo, `mithril-lynx-v2/`, **no** dentro de `mithril-lynx/`. Motivo textual:
@@ -486,17 +487,62 @@ validado — el hot-update chunk se sirvió y evaluó sin el error
 `ReferenceError: exports is not defined` de v1, en ningún momento de la
 sesión, sin ningún monkey-patch de `lynx.requireModuleAsync`).
 
-### F5–F6 — pendientes
+### F5 — cerrado, verificado con Lynx DevTool (2026-09-17, misma sesión)
 
-- **F5** (cruce con Lynx DevTool): inspeccionar el árbol de elementos en
-  vivo durante los 3 modos de reload con el DevTool conectado, para
-  confirmar 0 elementos huérfanos/duplicados — no se hizo en esta sesión
-  (se usó `uiautomator`/`adb logcat` como evidencia, suficiente para F3/F4
-  pero no reemplaza la inspección de árbol que DevTool da).
-- **F6** (empaquetado): no hay todavía un `create-mithril-lynx-v2` — cada
-  app nueva tendría que copiarse a mano desde `mithril-lynx-v2-app` como
-  referencia. Tampoco se implementó `module.hot.decline()` explícito para
-  cambios estructurales "duros" (el fallback a full reload ya sale solo
-  cuando `module.hot.check()` no puede propagar la actualización, como se
-  vio en la prueba de método C — un `decline()` explícito solo agregaría
-  un mensaje de log más claro, no cambia el comportamiento).
+Usando `agent-lynx` (skill `lynx-devtool`) contra el mismo device/sesión de
+F3/F4. Requirió activar switches que estaban OFF por defecto y necesitan un
+relanzamiento de la app para tomar efecto:
+`enable_dom_tree`, `enable_cdp_domain_dom`, `enable_cdp_domain_css`,
+`enable_cdp_domain_page` (`agent-lynx global-switch set --key <k> --status on`).
+Con eso, `DOM.enable {"useCompression":false}` + `DOM.getDocument
+{"depth":-1}` da el árbol real completo, con `nodeId` estables por
+elemento — la fuente de verdad para "¿se reusó el nodo o se recreó?",
+independiente de `uiautomator` (F4) y de las capturas de pantalla.
+
+**Baseline**: 6 nodos — `#document(11) > page(10) > view.Page(13) >
+[text.TitleBlue(14) > raw-text(15), input(16)]`.
+
+**Método A (datos)**: tras editar el texto del título, el árbol tiene
+**exactamente los mismos 6 `nodeId`** (10,11,13,14,15,16); el `nodeId 15`
+(el raw-text) pasó a tener el atributo `text` con el string nuevo — mismo
+nodo, atributo actualizado in-place, confirmado por CDP, no por
+inferencia visual.
+
+**Método B (estructural)**: tras insertar un nodo hermano nuevo entre el
+título y el input, el árbol pasó a 8 nodos: **los 6 originales
+(10,11,13,14,15,16) sin tocar** — el `input` sigue siendo el `nodeId 16`
+exacto — más dos nodos nuevos (`17`=el `text` nuevo, `18`=su `raw-text`),
+insertados en la posición correcta del árbol. Cero huérfanos, cero
+duplicados — el criterio de aceptación del plan original para F5, cumplido
+con una fuente de verdad distinta de `uiautomator` (que ya lo había
+confirmado por otro lado en F4: mismo resultado, dos instrumentos
+distintos).
+
+**Método C (full reload)**: tras editar `background.ts` (dispara el
+fallback, igual que en F3), el árbol se reconstruyó desde cero — mismo
+conteo de nodos que el estado B (8, porque el source todavía tenía el
+nodo "extra"), pero **la numeración de `nodeId` se reinició** (el segundo
+`text`/`raw-text` pasó de 17/18 a 16/17, el `input` de 16 a 18) — es
+decir, la sesión vieja se descartó por completo y se creó una página
+nueva de cero, sin ningún id viejo conviviendo con los nuevos. Exactamente
+el comportamiento esperado de un full reload — no es un caso de
+"huérfanos", es una página nueva reemplazando a la anterior.
+
+### F6 — hecho: `create-mithril-lynx-v2`
+
+Ver `create-mithril-lynx-v2/` (repo hermano nuevo). CLI mínimo que copia
+la plantilla (`templates/ts/`, calcada de `mithril-lynx-v2-app` una vez
+limpio de los edits de prueba de F3-F5) a un directorio nuevo, sustituye
+el nombre del paquete, y deja instrucciones de `npm install && npm run
+dev`. Uso: `npx create-mithril-lynx-v2 <nombre-app>`. No incluye un
+prompt interactivo (JS vs TS, blank vs demo) como tiene
+`create-mithril-lynx` (v1) — la plantilla única de F6 es intencionalmente
+mínima; ampliar el CLI queda fuera de este plan si hace falta más
+adelante.
+
+**Pendiente, no bloqueante**: `module.hot.decline()` explícito para
+cambios estructurales "duros" no está implementado — el fallback a full
+reload ya sale solo cuando `module.hot.check()` no puede propagar la
+actualización (confirmado en la prueba de método C de F3/F5). Un
+`decline()` explícito solo agregaría un mensaje de log más claro para el
+autor de la app, no cambia el comportamiento observable.
