@@ -5,17 +5,16 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
-    },
     "./background": {
+      "types": "./src/background.d.ts",
       "default": "./src/background.js"
     },
     "./main-thread": {
+      "types": "./src/main-thread.d.ts",
       "default": "./src/main-thread.js"
     },
     "./plugin": {
+      "types": "./plugin.d.ts",
       "default": "./plugin.js"
     }
   },
@@ -28,7 +27,8 @@
     "@lynx-js/rspeedy": "^0.17.0"
   },
   "dependencies": {
-    "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4"
+    "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4",
+    "@lynx-js/template-webpack-plugin": "^0.16.0"
   },
   "devDependencies": {
     "mithril": "2.3.8",

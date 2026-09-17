@@ -1,0 +1,68 @@
+// src/main-thread.js
+//
+// Entry point for the main thread (Lepus VM). Never runs Mithril or any app
+// view code (see background.js's header, plan §3.1) — only replays patches
+// from the background thread onto real Element PAPI, and forwards native
+// events back. Structure ported from mithril-lynx v1's
+// renderer/main-thread.js (setupRenderer()), which already validated this
+// exact __RenderPage/__DestroyLifetime timing and patch-buffering behavior
+// on a real device (mithril-lynx/DEVICE_VERIFICATION.md) — that plumbing
+// was never part of the bug this rewrite exists to fix.
+
+import { createPatchApplier } from "./apply-patch.js";
+import {
+	destroyLifetimeEventName,
+	onPatchFromBackground,
+	renderPageEventName,
+	sendEventToBackground,
+} from "./channel.js";
+
+// The native engine unconditionally invokes a global `processData(initData)`
+// hook on every __RenderPage — found missing here via real-device testing
+// in mithril-lynx v1 (its main-thread.js already had this fix; its
+// renderer/main-thread.js needed it too). Required regardless of framework.
+Object.assign(globalThis, {
+	processData: (data) => data,
+});
+
+/**
+ * Call once, at main-thread.ts's top level. Waits for `__RenderPage` to
+ * create the real page (the background thread's own initial render may
+ * finish before or after that fires — patches arriving early are buffered
+ * and replayed in order once the page exists), then wires the patch/event
+ * channel for the lifetime of the page.
+ */
+export function setupRenderer() {
+	const engine = lynx.getEngine();
+	let applier = null;
+	let pageReady = false;
+	let pendingPatches = [];
+
+	const onPatch = (event) => {
+		if (!pageReady) {
+			pendingPatches.push(event.data);
+			return;
+		}
+		applier.applyPatch(event.data);
+	};
+	onPatchFromBackground(onPatch);
+
+	const onRenderPage = () => {
+		const page = __CreatePage("0", 0);
+		const pageId = __GetElementUniqueID(page);
+		applier = createPatchApplier(pageId, {
+			onEvent: (id, type, nativeEvent) => sendEventToBackground(id, type, nativeEvent),
+		});
+		applier.registerPageRoot(page);
+		pageReady = true;
+		for (const ops of pendingPatches) applier.applyPatch(ops);
+		pendingPatches = [];
+	};
+	engine.addEventListener(renderPageEventName, onRenderPage);
+
+	const onDestroyLifetime = () => {
+		engine.removeEventListener(renderPageEventName, onRenderPage);
+		engine.removeEventListener(destroyLifetimeEventName, onDestroyLifetime);
+	};
+	engine.addEventListener(destroyLifetimeEventName, onDestroyLifetime);
+}

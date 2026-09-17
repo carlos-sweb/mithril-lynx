@@ -17,17 +17,19 @@ import renderFactory from "mithril/render/render.js";
 import { createLynxDocument } from "./fake-dom.js";
 import { createVirtualBackend } from "./backends/virtual-backend.js";
 import { createCommitController } from "./commit.js";
+import { onEventFromMainThread, sendPatchToMainThread } from "./channel.js";
 
 /**
  * @param {object} options
  * @param {() => unknown} options.root - Returns the current top-level vnode
  *   (a fresh hyperscript tree). Called on every render pass, including the
  *   very first — there is no separate "mount" vnode.
- * @param {(ops: unknown[]) => void} options.sendPatch - Ships one commit's
- *   worth of ops across the thread boundary. See channel.js for the actual
- *   transport (F0.1's decision).
+ * @param {(ops: unknown[]) => void} [options.sendPatch] - Ships one commit's
+ *   worth of ops across the thread boundary. Defaults to the real channel
+ *   (channel.js, F0.1's decision) — tests override it to capture ops
+ *   in-process instead.
  */
-export function renderApp({ root, sendPatch }) {
+export function renderApp({ root, sendPatch = sendPatchToMainThread }) {
 	const backend = createVirtualBackend();
 	const document = createLynxDocument(backend);
 	const render = renderFactory();
@@ -52,12 +54,24 @@ export function renderApp({ root, sendPatch }) {
 
 	performRender();
 
+	// Wires every forwarded native event straight to the fake-dom node it
+	// targets — `dispatchEvent` (fake-dom.js) then invokes Mithril's own
+	// EventDict exactly as a real DOM would, and (per the contract at the
+	// top of this file) `performRender` auto-fires afterward if the
+	// handler doesn't opt out. This is the ONLY consumer of
+	// `onEventFromMainThread` — app code never touches the channel directly.
+	onEventFromMainThread((event) => {
+		const { id, type, payload } = event.data;
+		const node = document.getNodeById(id);
+		if (!node) return;
+		node.dispatchEvent({ type, currentTarget: node, preventDefault() {}, stopPropagation() {}, ...payload });
+	});
+
 	return {
 		redraw: performRender,
-		/** Exposed for the background-side event router (see channel.js) —
-		 * forwarded native events are dispatched to the fake-dom node with
-		 * this id, which invokes Mithril's own EventDict and (per the
-		 * contract above) auto-redraws if the handler doesn't opt out. */
+		/** Exposed for tests and for an app's `module.hot.accept` glue (see
+		 * the demo app's background.ts) — never needed by the channel
+		 * wiring above, which is already fully self-contained. */
 		document,
 	};
 }

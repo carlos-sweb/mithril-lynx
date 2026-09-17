@@ -24,7 +24,7 @@ import { Op } from "./patch-protocol.js";
  *   page this applier is attached to. Every element this applier creates
  *   belongs to that one page — see CONTRACT.md / lynx-mithril-shim.js.
  */
-export function createPatchApplier(pageId) {
+export function createPatchApplier(pageId, { onEvent } = {}) {
 	// id (as allocated by the background's virtual backend) -> real PAPI
 	// element handle. id 0 is reserved for "the page itself" (see
 	// fake-dom.js's LynxDocument) — pre-seeded here so the very first
@@ -155,7 +155,7 @@ export function createPatchApplier(pageId) {
 					const type = ops[i++];
 					const handle = handles.get(id);
 					__AddEventListener(handle, type, (nativeEvent) => {
-						applyPatch.onEvent?.(id, type, nativeEvent);
+						onEvent?.(id, type, nativeEvent);
 					}, {});
 					break;
 				}
