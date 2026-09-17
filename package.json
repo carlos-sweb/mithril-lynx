@@ -16,6 +16,10 @@
     "./plugin": {
       "types": "./plugin.d.ts",
       "default": "./plugin.js"
+    },
+    "./route": {
+      "types": "./src/route.d.ts",
+      "default": "./src/route.js"
     }
   },
   "scripts": {
@@ -24,7 +28,7 @@
   "peerDependencies": {
     "@lynx-js/rspeedy": "^0.17.0",
     "@lynx-js/types": "4.1.0",
-    "mithril-runtime": "^1.0.0"
+    "mithril-runtime": "file:/home/sweb/mithril-runtime"
   },
   "dependencies": {
     "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4",
@@ -34,7 +38,7 @@
     "@lynx-js/testing-environment": "npm:@lynx-js/testing-environment-canary@0.3.2-canary-20260803-5a891c73",
     "@rstest/core": "^0.11.3",
     "jsdom": "^28.0.0",
-    "mithril-runtime": "^1.0.0",
+    "mithril-runtime": "file:/home/sweb/mithril-runtime",
     "typescript": "~6.0.3"
   },
   "engines": {

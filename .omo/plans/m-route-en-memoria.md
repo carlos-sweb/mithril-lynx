@@ -1,6 +1,13 @@
 # Plan — `m.route` para mithril-lynx-v2: navegación en memoria, sin APIs de navegador
 
-> Estado: **PROPUESTO, no iniciado.** Solo plan — no hay código todavía.
+> Estado (2026-09-17): **F0–F3 hechos y verificados con `rstest` (PAPI
+> real, sin mocks). F4–F6 bloqueados**: F4/F5 necesitan el device
+> conectado (no lo está en este momento — `adb devices` vacío); además
+> `mithril-runtime@1.1.0` (con `pathname/`/`querystring/` vendorizados)
+> está pusheado a GitHub pero el `npm publish` pide un OTP que solo el
+> usuario puede aprobar — mientras tanto `mithril-lynx-v2` depende de
+> `file:/home/sweb/mithril-runtime` en vez de `^1.1.0`. Ver §10 al final
+> para el detalle exacto.
 > Idioma: español (consistente con el resto de planes de este proyecto).
 > Insumo de las 3 tareas solicitadas: (1) cómo navega React en Lynx, (2)
 > cómo navega Vue en Lynx, (3) diseño de nuestro propio `m.route`
@@ -266,3 +273,66 @@ directo en `mithril-lynx-v2/route.js` — decisión de F1.
 - Arquitectura base sobre la que esto se integra:
   `mithril-lynx-v2-desde-cero.md` (especialmente §3.1, un solo
   `renderApp()`, y §3.4, el único punto de commit/redraw).
+
+---
+
+## 10. Estado de ejecución
+
+### F0 — respuesta parcial (estático, no en device)
+
+`grep` sobre `lynx_core.js` instalado (indicadores-android) y el runtime
+de ReactLynx (`@lynx-js/react`) no encontró **ningún** evento de "back"
+nativo/hardware expuesto al hilo JS — solo `onAppEnterBackground`
+(ciclo de vida de la app, no navegación). Consistente con que ni
+`MemoryRouter` ni `createMemoryHistory()` escuchan algo así. **No
+confirmado en vivo** — el device no estaba conectado en esta sesión.
+`route.back()`/`route.forward()` ya están implementados sobre el stack en
+memoria (§5.1); si F4 en device confirma que SÍ existe un evento nativo,
+conectarlo a `route.back()` es trivial.
+
+### F1–F3 — cerrados, verificados con `rstest` (5 tests nuevos, PAPI real)
+
+- **`mithril-runtime@1.1.0`**: se agregaron `pathname/{build,parse,
+  compileTemplate}.js` + `querystring/{build,parse}.js`, copiados sin
+  modificar desde mithril 2.3.8 (verificado: cero referencias a
+  `window`/`document`/`location`/`history`). `update-from-mithril.sh`
+  actualizado para seguir sincronizándolos. Commiteado y pusheado a
+  GitHub (`5e35bd2`); **`npm publish` pendiente del OTP del usuario**.
+- **`src/route.js`** (mithril-lynx-v2): implementado siguiendo §5
+  completo — historial en memoria, `route(defaultRoute, routes)` sin
+  parámetro `root` (llama `renderApp()` adentro, una sola vez, mismo
+  patrón `hasBeenResolved` que el `api/router.js` real), `route.set/get/
+  param/SKIP` idénticos en comportamiento a mithril real, `onmatch`
+  async preservado, `route.Link` reescrito con `ontap` (sin `<a>`/
+  `onclick`), `route.prefix` no-op documentado, y `route.back()/
+  forward()` nuevos (no existen en mithril real — necesarios porque acá
+  no hay botón de navegador que dispare `popstate`).
+- **`test/route.test.ts`** (5 tests, todos contra PAPI real vía
+  `@lynx-js/testing-environment`, mismo patrón que
+  `test/end-to-end.test.ts`): ruta por defecto + `get()`/`param()`;
+  navegación sin nodos huérfanos (ops de `RemoveChild`+`CreateElement`
+  confirmados); `back()`/`forward()` sobre el stack; `onmatch`+`SKIP`
+  cayendo a la siguiente ruta; `Link` navegando por tap y respetando
+  `disabled`. **Los 8 tests de la suite completa pasan** (los 3 de antes
+  + estos 5).
+- **Deviación respecto al plan original**: el plan (§5.2) proponía que
+  `m.route(...)` devolviera el handle `{redraw, document}` de
+  `renderApp()`. Al implementarlo se decidió NO devolver nada (igual que
+  el `m.route()` real, que tampoco devuelve algo útil) — el auto-redraw
+  de Mithril ya cubre todos los redraws necesarios sin que el código de
+  la app necesite tocar `app.redraw()`/`app.document` directamente. Más
+  fiel a "se siente Mithril" que la propuesta original.
+- **Dependencia temporal**: mientras `mithril-runtime@1.1.0` no esté en
+  npm, `mithril-lynx-v2/package.json` apunta a
+  `file:/home/sweb/mithril-runtime` en vez de `^1.1.0` — cambiar en
+  cuanto el publish se complete (mismo procedimiento que la vez pasada
+  con 1.0.0).
+
+### F4–F6 — pendientes, bloqueados por el device
+
+No se pudo verificar en device real esta sesión (`adb devices` no listó
+ningún device conectado). Falta: navegar entre 2+ pantallas reales y
+confirmar árbol limpio con `uiautomator`/DevTool (F4); confirmar o
+descartar en vivo el hallazgo estático de F0 sobre el botón atrás (F5);
+probar reload (A/B) combinado con una ruta activa (F6). Reconectar el
+device y correr esto es el siguiente paso concreto.
