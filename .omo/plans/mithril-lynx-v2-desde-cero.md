@@ -1,7 +1,11 @@
 # Plan — mithril-lynx v2: reescritura completa, redraw automático, 3 modos de reload
 
-> Estado: **PROPUESTO, no iniciado.** Este documento es solo el plan — no hay
-> código de v2 todavía. Idioma: español (consistente con el resto de planes
+> Estado (2026-09-17): **F0, F1 y F2 completados y verificados con
+> `rstest` (no mocks — PAPI real vía `@lynx-js/testing-environment`).**
+> F3–F6 pendientes (necesitan build real + device). Código en
+> `mithril-lynx-v2/src/`, commit inicial `87c1a36`, git local (sin remoto).
+> Ver §8 al final de este documento para el detalle exacto de qué quedó
+> hecho, con evidencia. Idioma: español (consistente con el resto de planes
 > de este proyecto).
 >
 > Decisión del usuario (2026-09-17): v2 se escribe en un directorio hermano
@@ -339,3 +343,94 @@ de referencia claro.
   conceptos de Element PAPI wrapper, gestos y listas ya validados en device,
   candidatos a reimplementar (no copiar) en v2 — no forman parte del
   problema de reload, son infraestructura ya resuelta.
+
+---
+
+## 8. Estado de ejecución (actualizado en vivo, no re-escribir el plan de arriba)
+
+### F0 — cerrado, con evidencia real (no experimento en device todavía, pero no hacía falta)
+
+- **F0.1** (canal nativo sin `@lynx-js/react`): `callLepusMethod` **no existe**
+  en el `lynx_core.js` real instalado (`indicadores-android/.../lynx_core.js`,
+  0 ocurrencias). Sí existe `lynx.triggerLepusGlobalEvent(name, params)` —
+  genérico, público, parte del motor base, no de `@lynx-js/react`. Queda
+  como candidato de canal para F3; el canal de evento genérico de v1
+  (`getCoreContext`/`getJSContext`, también presentes en ese mismo
+  `lynx_core.js`) sigue como fallback validado si `triggerLepusGlobalEvent`
+  no calza con lo que necesita v2 en la práctica.
+- **F0.2** (wrapping de chunks hot-update): **causa raíz encontrada, no es
+  una limitación arquitectónica.** v1 ya depende de
+  `@lynx-js/runtime-wrapper-webpack-plugin` (el mismo plugin oficial que usa
+  ReactLynx) pero lo configura con
+  `test: new RegExp(`${name}/background\\.js$`)` (`mithril-lynx/plugin.js:613`)
+  — matchea el asset inicial `main-thread/background.js` (ruta con slash,
+  el nombre de ASSET) pero nunca los chunks `.hot-update.js` (que se emiten
+  planos, nombrados por el nombre del CHUNK: `main-thread__background.<hash>.hot-update.js`,
+  con doble guión bajo, sin slash). Confirmado con un test de regex directo,
+  no con una build completa. **F6 solo necesita ampliar ese regex** —
+  no hace falta un plugin nuevo ni el monkey-patch de
+  `lynx.requireModuleAsync` que v1 tuvo que escribir.
+- **F0.3** (guard de versión): implementado y testeado directamente
+  (`src/reload/version.js` + `test/reload-version.test.ts`), sin
+  necesidad de reproducir la race real todavía — la lógica es la misma que
+  usa ReactLynx, de bajo riesgo.
+
+### F1 — cerrado y verificado
+
+Reescrito desde cero (`src/fake-dom.js`, `src/commit.js`, `src/background.js`),
+corriendo el `mithril@2.3.8` real (`render/render.js`, sin fork) contra un
+DOM falso construido para este propósito — no contra una copia modificada
+del shim de v1. El contrato exacto de esa reimplementación está en
+`mithril-lynx/CONTRACT.md` (ya escrito por una sesión anterior, verificado
+por grep contra el `render.js` real) — se usó como checklist, no como
+código a copiar.
+
+**Test decisivo, verde desde el primer commit** (`test/end-to-end.test.ts`):
+un `ontap` que muta estado SIN llamar `redraw()`/`m.redraw()` en ningún
+lado produce un segundo patch automáticamente — el mismo escenario que
+estaba en rojo en v1 (`mithril-lynx/test/renderer-integration.test.ts`,
+"device regression"). La diferencia de diseño que lo logra: el callback de
+redraw que Mithril llama solo (`EventDict.handleEvent`, contrato ya
+documentado en CONTRACT.md §e) es una clausura capturada una vez
+(`performRender` en `src/background.js`), nunca un global condicional.
+
+### F2 — núcleo cerrado y verificado; aplicación en main-thread con un TODO explícito
+
+`src/patch-protocol.js` (array plano de opcodes, patrón `SnapshotOperation`
+de ReactLynx) + `src/backends/virtual-backend.js` (background, genera ops) +
+`src/apply-patch.js` (main-thread, aplica ops con PAPI real —
+`__CreateView`/`__CreateText`/`__CreateElement`/`__CreateRawText`/
+`__AppendElement`/`__InsertElementBefore`/`__RemoveElement`/`__SetAttribute`/
+`__SetClasses`/`__AddInlineStyle`/`__AddEventListener`/`__FlushElementTree`,
+todas validadas ya en device por v1 — ver `mithril-lynx/src/lynx-mithril-shim.js`
+líneas 503-519 y `CONTRACT.md`).
+
+**Test decisivo** (`test/end-to-end.test.ts`, mismo archivo que F1): el
+patch inicial y el patch del auto-redraw se aplican con el PAPI real de
+`@lynx-js/testing-environment` (no un mock) y el handler del tap corre
+sobre el nodo real correcto.
+
+**Evidencia adicional para F4** (`test/structural-reload.test.ts`, no
+sustituye la verificación en device pero da una señal fuerte antes de
+llegar ahí): insertar un nodo hermano NUEVO junto a un nodo `input`-like
+existente, ambos con `key`, **no** produce ningún op de
+`CreateElement`/`RemoveChild` sobre el id del input — el diff normal de
+Mithril lo reusa in-place. Confirma la hipótesis del §3.6 en el caso
+keyed; el caso sin `key` NO se probó a propósito (es sabido que ahí
+Mithril recrea desde el punto de la diferencia — disciplina de `key`
+documentada, no bug).
+
+**TODO explícito dejado en el código** (`apply-patch.js`, caso
+`RemoveStyleProperty` con nombre `"*"`, o sea `element.style = ""`): lanza
+un error en vez de fallar en silencio, porque no hay todavía una llamada
+PAPI de "limpiar todos los estilos de una vez" validada. Bloqueante solo
+si una app usa ese patrón exacto; no bloquea F3.
+
+### F3–F6 — pendientes
+
+Necesitan una app real construida contra `mithril-lynx-v2` (scaffold
+nuevo o adaptar `mithril-app-final`), el fix de regex de F0.2 aplicado en
+un `plugin.js` de v2 (todavía no escrito), y el device conectado
+(`R8YYC0VV0PV`, confirmado disponible por `adb devices` en esta sesión)
+para F3 (reload A+C), F4 (reload B + foco), F5 (DevTool). Este es el
+siguiente bloque de trabajo concreto — no iniciado en esta sesión.
