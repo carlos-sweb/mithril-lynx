@@ -134,7 +134,7 @@ export function pluginMithrilLynxV2(options = {}) {
 			});
 
 			api.modifyBundlerChain((chain, { isDev, environment }) => {
-				// Force a single resolved copy of "mithril" and
+				// Force a single resolved copy of "mithril-runtime" and
 				// "mithril-lynx-v2" — a `file:`-linked local package can
 				// otherwise resolve a second physical copy with its own
 				// module-level state (this exact class of bug bit v1 twice:
@@ -143,10 +143,10 @@ export function pluginMithrilLynxV2(options = {}) {
 				// comments for the on-device symptom).
 				try {
 					const appRequire = createRequire(path.join(process.cwd(), "package.json"));
-					const mithrilDir = path.dirname(appRequire.resolve("mithril/package.json"));
-					chain.resolve.alias.set("mithril", mithrilDir);
+					const mithrilDir = path.dirname(appRequire.resolve("mithril-runtime/package.json"));
+					chain.resolve.alias.set("mithril-runtime", mithrilDir);
 				} catch {
-					// App has no local "mithril" resolvable from its own root.
+					// App has no local "mithril-runtime" resolvable from its own root.
 				}
 				// Note: v1 also force-aliased its OWN package name here (a
 				// second copy of mithril-lynx would mean two disconnected

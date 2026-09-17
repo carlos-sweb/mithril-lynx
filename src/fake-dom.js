@@ -1,7 +1,10 @@
 // src/fake-dom.js
 //
-// A DOM implementation good enough for the REAL, unmodified
-// `mithril/render/render.js@2.3.8` to run against — nothing more. The exact
+// A DOM implementation good enough for the REAL `render/render.js` (from
+// `mithril-runtime`, https://github.com/carlos-sweb/mithril-runtime — a
+// distribution of Mithril 2.3.8 that drops the browser-only route/trust/
+// request APIs, with render/render.js itself otherwise unmodified from
+// upstream, see CONTRACT.md §g) to run against — nothing more. The exact
 // surface required is documented in `mithril-lynx/CONTRACT.md` (a prior,
 // verified-by-grep extraction of what render.js actually touches on its
 // `dom` parameter): createElement(NS)/createTextNode/createDocumentFragment,

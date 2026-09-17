@@ -13,7 +13,7 @@
 // here it is `performRender` — a plain closure, captured once, always the
 // same reference, never looked up through a global.
 
-import renderFactory from "mithril/render/render.js";
+import renderFactory from "mithril-runtime/render/render.js";
 import { createLynxDocument } from "./fake-dom.js";
 import { createVirtualBackend } from "./backends/virtual-backend.js";
 import { createCommitController } from "./commit.js";
