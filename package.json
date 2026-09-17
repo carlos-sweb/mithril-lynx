@@ -1,0 +1,43 @@
+{
+  "name": "mithril-lynx-v2",
+  "version": "0.0.0",
+  "description": "Mithril.js on Lynx, v2: real mithril/render/render.js driven through a Lynx-backed fake DOM, with an explicit single commit hook (no conditional global flush) and three reload modes (data-light, structural-light, full).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./background": {
+      "default": "./src/background.js"
+    },
+    "./main-thread": {
+      "default": "./src/main-thread.js"
+    },
+    "./plugin": {
+      "default": "./plugin.js"
+    }
+  },
+  "scripts": {
+    "test": "rstest run"
+  },
+  "peerDependencies": {
+    "mithril": "2.3.8",
+    "@lynx-js/types": "4.1.0",
+    "@lynx-js/rspeedy": "^0.17.0"
+  },
+  "dependencies": {
+    "@lynx-js/runtime-wrapper-webpack-plugin": "^0.2.4"
+  },
+  "devDependencies": {
+    "mithril": "2.3.8",
+    "@lynx-js/testing-environment": "npm:@lynx-js/testing-environment-canary@0.3.2-canary-20260803-5a891c73",
+    "@rstest/core": "^0.11.3",
+    "jsdom": "^28.0.0",
+    "typescript": "~6.0.3"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
