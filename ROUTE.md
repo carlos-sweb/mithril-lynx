@@ -1,9 +1,9 @@
-# `mithril-lynx-v2/route`
+# `mithril-lynx/route`
 
 `m.route`, reimplemented for an environment with no URL bar and no `window.history` — Lynx pages aren't URL-addressable, so there's nothing for a real `popstate`-based router to hook into. This is not a limitation specific to Mithril: it's why React Router ships `MemoryRouter` and Vue Router ships `createMemoryHistory()` for exactly this kind of environment. `route.js` follows the same pattern — an in-memory array standing in for the browser's session history — while keeping the rest of the real `m.route` API shape, so route-using view code doesn't need to be rewritten, just re-imported.
 
 ```js
-import route from "mithril-lynx-v2/route";
+import route from "mithril-lynx/route";
 ```
 
 ## Setup
@@ -15,7 +15,7 @@ route("/", {
 });
 ```
 
-Unlike real Mithril, this call takes no `root` DOM argument — v2 has exactly one `renderApp()` for the app's whole lifetime (see the main README's architecture section), so `route(...)` calls it internally the first time a route resolves. `defaultRoute` (`"/"` above) is both the fallback for an unmatched path **and** the screen the app starts on — there's no browser URL to read an initial path from, so this is the Lynx equivalent of React Router's `initialEntries={["/"]}`.
+Unlike real Mithril, this call takes no `root` DOM argument — this package has exactly one `renderApp()` for the app's whole lifetime (see the main README's architecture section), so `route(...)` calls it internally the first time a route resolves. `defaultRoute` (`"/"` above) is both the fallback for an unmatched path **and** the screen the app starts on — there's no browser URL to read an initial path from, so this is the Lynx equivalent of React Router's `initialEntries={["/"]}`.
 
 Route values can be a plain component, or a resolver object with `onmatch`/`render`, exactly like real Mithril:
 

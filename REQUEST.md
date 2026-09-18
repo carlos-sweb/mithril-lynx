@@ -1,9 +1,9 @@
-# `mithril-lynx-v2/request`
+# `mithril-lynx/request`
 
 `m.request`, reimplemented as a wrapper over Lynx's own `fetch` — real `m.request` is built on `XMLHttpRequest`, which doesn't exist on Lynx. The gap between the two turned out smaller than the installed `@lynx-js/types` suggested; the full option-by-option comparison, with real-device evidence for every claim (not just docs/types, both of which were wrong at least once during that investigation), lives in [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md). This file is the practical usage doc; that one is the research record.
 
 ```js
-import request from "mithril-lynx-v2/request";
+import request from "mithril-lynx/request";
 ```
 
 ## Basic usage
@@ -62,7 +62,7 @@ Two separate layers, deliberately not mixed:
 - **Unit tests** (`test/request.test.ts`, run via `npm test`) inject a fake `fetch` via `createRequestor(fetchImpl)` — they validate the wrapper's own logic (URL building, body encoding, the unsupported-option throws, the redraw timing below) without touching the network.
 - **The underlying `lynx.fetch` primitive itself** — redirects, `AbortController`, `URLSearchParams` bodies, `Headers` case-sensitivity — is validated separately against a real device and a real server, documented with the raw evidence in `FETCH_INVESTIGATION.md`.
 
-`createRequestor()` is also there for any app that wants its own singleton (e.g. pointed at a different fake for a specific test file); `import request from "mithril-lynx-v2/request"` is the default singleton for normal app use, matching real `m.request`'s feel.
+`createRequestor()` is also there for any app that wants its own singleton (e.g. pointed at a different fake for a specific test file); `import request from "mithril-lynx/request"` is the default singleton for normal app use, matching real `m.request`'s feel.
 
 ## A Lynx timer quirk this module works around
 
