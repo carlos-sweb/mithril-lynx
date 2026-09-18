@@ -75,6 +75,14 @@ export function createVirtualBackend() {
 		removeGestureDetector(id, gestureId) {
 			pushOp(ops, Op.RemoveGestureDetector, id, gestureId);
 		},
+		createList(rendererKey, scrollOrientation, listType, spanCount) {
+			const id = nextId++;
+			pushOp(ops, Op.CreateList, id, rendererKey, scrollOrientation, listType, spanCount);
+			return id;
+		},
+		setListItems(id, items) {
+			pushOp(ops, Op.SetListItems, id, JSON.stringify(items));
+		},
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {
 			if (ops.length === 0) return null;

@@ -42,6 +42,13 @@ export const Op = Object.freeze({
 	// background-thread side.
 	SetGestureDetector: 14, // id, gestureId, gestureType, arenaPolicy
 	RemoveGestureDetector: 15, // id, gestureId
+	// A native virtualized list — see docs/native-papi/papi-06-virtualized-lists.md
+	// in mithril-lynx-ui for the full design. rendererKey looks up a
+	// render function registered on the MAIN thread (mithril-lynx/
+	// list-support's registerListRenderer()) — the function itself can't
+	// cross the thread boundary, only this string key can.
+	CreateList: 16, // id, rendererKey, scrollOrientation, listType, spanCount
+	SetListItems: 17, // id, itemsJSON (items must be JSON-serializable — they DO cross the boundary, as data)
 });
 
 /**

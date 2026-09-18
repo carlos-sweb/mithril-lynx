@@ -1,11 +1,16 @@
 // src/apply-patch.js
 //
-// The main-thread half of the patch protocol. Deliberately NOT a DOM — it
-// never runs Mithril's render.js (only the background thread does, see
-// background.js) — it is a direct, low-level interpreter of the flat op
-// array straight onto the real Element PAPI, in the spirit of ReactLynx's
-// own `snapshotPatchApply.js` (see rspeedy-react-analysis/LYNX_PAPI_SPEC.md
-// §4.3): a switch over op codes, one real PAPI call per case, nothing else.
+// The main-thread half of the patch protocol. Deliberately NOT a DOM for
+// the app's OWN tree — it never runs Mithril's render.js for that (only
+// the background thread does, see background.js) — it is a direct,
+// low-level interpreter of the flat op array straight onto the real
+// Element PAPI, in the spirit of ReactLynx's own `snapshotPatchApply.js`
+// (see rspeedy-react-analysis/LYNX_PAPI_SPEC.md §4.3): a switch over op
+// codes, one real PAPI call per case, nothing else. One deliberate
+// exception: Op.CreateList's own cell content (see list-support.js) DOES
+// run a real Mithril render pass right here, on this thread — the only way
+// to satisfy native's synchronous componentAtIndex contract at all (see
+// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui).
 //
 // The exact `__Create*`/pageId contract below (one `pageId` shared by every
 // element on a page, `__CreateView`/`__CreateText`/generic `__CreateElement`
@@ -18,6 +23,7 @@
 // commit/reload layer (commit.js, reload/*.js), never in this mapping.
 
 import { Op } from "./patch-protocol.js";
+import { createNativeList } from "./list-support.js";
 
 // --- Native gesture support (Op.SetGestureDetector) ------------------------
 //
@@ -353,6 +359,22 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					const gestureId = ops[i++];
 					const handle = handles.get(id);
 					if (typeof __RemoveGestureDetector === "function") __RemoveGestureDetector(handle, gestureId);
+					break;
+				}
+				case Op.CreateList: {
+					const id = ops[i++];
+					const rendererKey = ops[i++];
+					const scrollOrientation = ops[i++];
+					const listType = ops[i++];
+					const spanCount = ops[i++];
+					handles.set(id, createNativeList(pageId, rendererKey, scrollOrientation, listType, spanCount, createPatchApplier, onEvent));
+					break;
+				}
+				case Op.SetListItems: {
+					const id = ops[i++];
+					const itemsJSON = ops[i++];
+					const listHandle = handles.get(id);
+					listHandle.__setItems(JSON.parse(itemsJSON));
 					break;
 				}
 				default:

@@ -165,12 +165,23 @@ function createStyleProxy(element) {
 let nextGestureId = 1;
 
 export class LynxElement extends LynxContainerNode {
-	constructor(ownerDocument, backend, tag, ns) {
+	/**
+	 * `listConfig`, when given, makes this a native virtualized list
+	 * element instead of a plain one — see patch-protocol.js's
+	 * Op.CreateList and docs/native-papi/papi-06-virtualized-lists.md
+	 * (mithril-lynx-ui) for the full design. Not constructed directly;
+	 * use LynxDocument#createNativeList().
+	 */
+	constructor(ownerDocument, backend, tag, ns, listConfig) {
 		super(ownerDocument);
 		this._backend = backend;
 		this.tag = tag;
 		this.namespaceURI = ns;
-		this._id = ns ? backend.createElementNS(ns, tag) : backend.createElement(tag);
+		this._id = listConfig
+			? backend.createList(listConfig.rendererKey, listConfig.scrollOrientation, listConfig.listType, listConfig.spanCount)
+			: ns
+				? backend.createElementNS(ns, tag)
+				: backend.createElement(tag);
 		ownerDocument._nodesById.set(this._id, this);
 		this._style = null;
 		this._styleEverSet = false;
@@ -278,6 +289,11 @@ export class LynxElement extends LynxContainerNode {
 
 	removeGestureDetector(gestureId) {
 		this._backend.removeGestureDetector(this._id, gestureId);
+	}
+
+	/** Only meaningful on an element created via LynxDocument#createNativeList(). */
+	setListItems(items) {
+		this._backend.setListItems(this._id, items);
 	}
 
 	addEventListener(type, listener) {
@@ -420,6 +436,25 @@ export class LynxDocument extends LynxContainerNode {
 
 	createDocumentFragment() {
 		return new LynxFragment(this);
+	}
+
+	/**
+	 * A native virtualized list — see patch-protocol.js's Op.CreateList.
+	 * `rendererKey` must match a key registered on the MAIN thread via
+	 * mithril-lynx/list-support's registerListRenderer() (see
+	 * docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui):
+	 * the renderer function itself can't cross the thread boundary, only
+	 * this string key can. Call `.setListItems(items)` on the result to
+	 * populate it — items must be JSON-serializable, since they DO cross
+	 * the boundary, as data.
+	 */
+	createNativeList(rendererKey, options = {}) {
+		return new LynxElement(this, this._backend, "list", undefined, {
+			rendererKey,
+			scrollOrientation: options.scrollOrientation ?? "vertical",
+			listType: options.listType ?? "single",
+			spanCount: options.spanCount ?? 1,
+		});
 	}
 }
 
