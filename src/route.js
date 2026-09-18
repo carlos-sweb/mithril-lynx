@@ -13,7 +13,7 @@
 // `hasBeenResolved` gate) so porting route-using app code only requires
 // swapping the import, not relearning the control flow. The one
 // unavoidable signature change: `m.route(root, defaultRoute, routes)`
-// loses `root` — there is no DOM node to point it at in v2's architecture
+// loses `root` — there is no DOM node to point it at in this architecture
 // (a single `renderApp()` for the app's whole lifetime, plan §3.1) — see
 // the plan §5.2 for why that's a deliberate, documented deviation rather
 // than a fake DOM node just to keep the arg count.
@@ -100,7 +100,7 @@ export function createRoute() {
 	/**
 	 * @param {string} defaultRoute - Both the fallback for an unmatched path
 	 *   AND the screen the app starts on — there is no browser URL to read
-	 *   an initial path from, so this is the one path v2 always starts at
+	 *   an initial path from, so this is the one path the app always starts at
 	 *   (the closest in-memory equivalent of React Router's
 	 *   `initialEntries={["/"]}`).
 	 * @param {Record<string, unknown>} routes - Same shape as real

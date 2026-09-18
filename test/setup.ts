@@ -1,9 +1,9 @@
 // test/setup.ts
 //
 // The minimal gap-fill on top of @lynx-js/testing-environment's own PAPI
-// polyfill — same idea as mithril-lynx v1's testing.js, scoped down to only
-// what v2's apply-patch.js actually calls so far (no gestures/lists yet,
-// see the v2 plan's non-goals). `@lynx-js/testing-environment` already
+// polyfill — same idea as the previous mithril-lynx's testing.js, scoped
+// down to only what apply-patch.js actually calls so far (no gestures/lists
+// yet, see the plan's non-goals). `@lynx-js/testing-environment` already
 // implements __CreateView/__CreateText/__CreateElement/__CreateRawText/
 // __AppendElement/__InsertElementBefore/__RemoveElement/__SetAttribute/
 // __SetClasses/__AddInlineStyle/__FlushElementTree/__GetElementUniqueID —

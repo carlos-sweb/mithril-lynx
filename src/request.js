@@ -36,7 +36,7 @@ function checkUnsupported(options) {
 	for (const [name, matches] of UNSUPPORTED) {
 		if (matches(options)) {
 			throw new Error(
-				`[mithril-lynx-v2/request] "${name}" is not supported — Lynx's fetch has no equivalent ` +
+				`[mithril-lynx/request] "${name}" is not supported — Lynx's fetch has no equivalent ` +
 					"(see FETCH_INVESTIGATION.md for exactly why). This throws instead of silently " +
 					"behaving differently from what you asked for.",
 			);
@@ -78,7 +78,7 @@ export function createRequestor(fetchImpl) {
 
 		if (typeof FormData !== "undefined" && options.body instanceof FormData) {
 			throw new Error(
-				"[mithril-lynx-v2/request] FormData bodies are not supported — Lynx has no FormData " +
+				"[mithril-lynx/request] FormData bodies are not supported — Lynx has no FormData " +
 					"at runtime (confirmed absent, see FETCH_INVESTIGATION.md). Use lynx.fetch directly " +
 					"if you have another way to send this data, or restructure it as plain JSON.",
 			);

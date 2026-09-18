@@ -114,7 +114,7 @@ function invokeCdpReload() {
 			if (!data) return;
 			try {
 				var parsed = JSON.parse(data);
-				if (parsed.error) console.error("[mithril-lynx-v2] Page.reload failed:", parsed.error.message);
+				if (parsed.error) console.error("[mithril-lynx] Page.reload failed:", parsed.error.message);
 			} catch (e) {
 				// response is not JSON — ignore
 			}
@@ -129,7 +129,7 @@ function reload(reason) {
 	if (socket) socket.close();
 	if (!invokeCdpReload()) {
 		console.warn(
-			"[mithril-lynx-v2] Live reload unavailable: NativeModules.LynxDevToolSetModule.invokeCdp was not found.",
+			"[mithril-lynx] Live reload unavailable: NativeModules.LynxDevToolSetModule.invokeCdp was not found.",
 		);
 	}
 }
@@ -191,7 +191,7 @@ function handleMessage(rawMessage) {
 	try {
 		message = JSON.parse(rawMessage);
 	} catch (e) {
-		console.warn("[mithril-lynx-v2] Ignoring an invalid dev-server message.");
+		console.warn("[mithril-lynx] Ignoring an invalid dev-server message.");
 		return;
 	}
 
@@ -219,7 +219,7 @@ function handleMessage(rawMessage) {
 			}
 			break;
 		case "errors":
-			console.warn("[mithril-lynx-v2] Build failed; waiting for the next successful build.", message.data);
+			console.warn("[mithril-lynx] Build failed; waiting for the next successful build.", message.data);
 			break;
 	}
 }
@@ -230,11 +230,11 @@ function connect(retries) {
 
 	socket = new WebSocket(socketURL(options));
 	socket.onmessage = function (event) { handleMessage(event.data); };
-	socket.onerror = function (error) { console.error("[mithril-lynx-v2] Dev server connection error:", error); };
+	socket.onerror = function (error) { console.error("[mithril-lynx] Dev server connection error:", error); };
 	socket.onclose = function () {
 		if (reloading) return;
 		if (retries >= 10) {
-			console.error("[mithril-lynx-v2] Unable to reconnect to the dev server.");
+			console.error("[mithril-lynx] Unable to reconnect to the dev server.");
 			return;
 		}
 		var delay = 1000 * Math.pow(2, retries) + Math.random() * 100;

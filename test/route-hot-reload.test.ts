@@ -14,7 +14,7 @@ describe("route.js + stable-host: a same-path re-resolve patches in place, never
 	it("swapping the live-bound view (module.hot.accept's job) produces only a SetText, no Create/Remove", () => {
 		lynxTestingEnv.switchToMainThread();
 		const capturedOps: unknown[][] = [];
-		lynx.getJSContext().addEventListener("MithrilLynxV2:Patch", (event: any) => {
+		lynx.getJSContext().addEventListener("MithrilLynx:Patch", (event: any) => {
 			capturedOps.push(event.data);
 		});
 

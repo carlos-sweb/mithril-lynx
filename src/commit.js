@@ -1,24 +1,24 @@
 // src/commit.js
 //
 // The single, explicit, non-conditional flush contract — this is the actual
-// fix for the regression that motivated the whole v2 rewrite (see
+// fix for the regression that motivated the whole rewrite (see
 // mithril-lynx-v2-desde-cero.md §3.4 and mithril-lynx/AGENTS.md's "Estado
-// actual" section for the v1 postmortem).
+// actual" section for the old implementation's postmortem).
 //
-// v1's bug in one sentence: whether a redraw actually reached the main
+// The old bug in one sentence: whether a redraw actually reached the main
 // thread depended on `typeof globalThis.__FlushElementTree === "function"`
 // — a question whose answer depended on thread/test/mode ordering. That is
 // a race condition baked into the architecture, not an edge case to patch.
 //
-// v2's rule: there is exactly one commit callback for the lifetime of one
-// `renderApp()` call (see background.js). It is installed explicitly, once,
-// by the code that owns the render — never discovered implicitly by
+// The rule here: there is exactly one commit callback for the lifetime of
+// one `renderApp()` call (see background.js). It is installed explicitly,
+// once, by the code that owns the render — never discovered implicitly by
 // whoever happens to ask first. Asking to commit before installing one is a
 // programmer error and throws immediately and loudly, on the same tick,
 // with a message that says exactly what's missing — never a silently
-// frozen screen (which is what v1 did instead).
+// frozen screen (which is what the old implementation did instead).
 
-const NOT_MOUNTED = Symbol("mithril-lynx-v2:not-mounted");
+const NOT_MOUNTED = Symbol("mithril-lynx:not-mounted");
 
 export function createCommitController() {
 	let commitFn = NOT_MOUNTED;
@@ -33,7 +33,7 @@ export function createCommitController() {
 		install(fn) {
 			if (commitFn !== NOT_MOUNTED) {
 				throw new Error(
-					"[mithril-lynx-v2] commit callback already installed. " +
+					"[mithril-lynx] commit callback already installed. " +
 						"A shim instance is single-use: one renderApp() call, one " +
 						"commit callback, for the lifetime of that background " +
 						"context. If you're re-mounting for a reload, create a new " +
@@ -55,7 +55,7 @@ export function createCommitController() {
 		commit() {
 			if (commitFn === NOT_MOUNTED) {
 				throw new Error(
-					"[mithril-lynx-v2] commit() called before renderApp() mounted " +
+					"[mithril-lynx] commit() called before renderApp() mounted " +
 						"the app. This is always a bug in the framework's own " +
 						"wiring, never something app code can trigger by accident " +
 						"— app code never calls commit() directly.",

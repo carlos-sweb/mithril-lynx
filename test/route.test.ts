@@ -21,7 +21,7 @@ function setupRealTree() {
 	// on the main-thread side so ops can be applied and the resulting real
 	// tree inspected.
 	lynxTestingEnv.switchToMainThread();
-	lynx.getJSContext().addEventListener("MithrilLynxV2:Patch", (event: any) => {
+	lynx.getJSContext().addEventListener("MithrilLynx:Patch", (event: any) => {
 		capturedOps.push(event.data);
 		lynxTestingEnv.switchToMainThread();
 		applier.applyPatch(event.data);

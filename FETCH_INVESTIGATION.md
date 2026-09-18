@@ -70,7 +70,7 @@ y los `.d.ts` reales instalados en
 `fetch` está declarado como método del objeto `Lynx` dentro de
 `types/background-thread/` — **solo existe en el hilo background**, no
 en `common/` ni `main-thread/`. Encaja con la arquitectura entera de
-`mithril-lynx-v2` (toda la vista corre en background) — no hace falta
+`mithril-lynx` (toda la vista corre en background) — no hace falta
 ningún puente cross-thread para esto.
 
 ### 2.2 La firma real, completa, sin recortar
@@ -290,7 +290,7 @@ cancelación y timeout reales, que en la primera pasada de esta
 investigación parecían imposibles — funciona.
 
 **Recomendación**: implementar el subconjunto confirmado como
-`mithril-lynx-v2/request`, documentando explícitamente (no escondiendo)
+`mithril-lynx/request`, documentando explícitamente (no escondiendo)
 los 4-5 puntos sin equivalente, con una sugerencia directa de usar
 `lynx.fetch` nativo para esos casos puntuales.
 

@@ -21,7 +21,7 @@
 // Mithril's render.js at all — it only replays the recorded ops through
 // `apply-patch.js`, which calls the real Element PAPI directly. That split
 // is the point of the whole architecture (see
-// mithril-lynx-v2/.omo/plans/mithril-lynx-v2-desde-cero.md §3.1): only ONE
+// .omo/plans/mithril-lynx-v2-desde-cero.md §3.1): only ONE
 // side needs to be "a DOM", the other side only needs to be "a PAPI patch
 // applier".
 
@@ -186,7 +186,7 @@ export class LynxElement extends LynxContainerNode {
 			// CSS-text parser. Documented limitation, not a silent bug.
 			if (typeof console !== "undefined") {
 				console.warn(
-					"[mithril-lynx-v2] Assigning a CSS text string to `style` is not supported; use a style object.",
+					"[mithril-lynx] Assigning a CSS text string to `style` is not supported; use a style object.",
 				);
 			}
 			return;
@@ -265,7 +265,7 @@ export class LynxElement extends LynxContainerNode {
 		// already-empty-or-not container.
 		if (value !== "") {
 			if (typeof console !== "undefined") {
-				console.warn("[mithril-lynx-v2] Non-empty `textContent` assignment is not supported.");
+				console.warn("[mithril-lynx] Non-empty `textContent` assignment is not supported.");
 			}
 			return;
 		}
@@ -280,7 +280,7 @@ export class LynxElement extends LynxContainerNode {
 		// mithril-lynx/AGENTS.md history) rather than silently doing nothing
 		// with no signal.
 		if (typeof console !== "undefined") {
-			console.warn("[mithril-lynx-v2] `m.trust()` / innerHTML is not supported on Lynx elements.");
+			console.warn("[mithril-lynx] `m.trust()` / innerHTML is not supported on Lynx elements.");
 		}
 	}
 

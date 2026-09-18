@@ -11,8 +11,8 @@ import { createPatchApplier } from "../src/apply-patch.js";
 // call anywhere in the view below) produces a second patch that updates
 // the real tree again.
 //
-// This is the direct replacement for mithril-lynx v1's
-// `test/renderer-integration.test.ts` — same intent, rewritten for the v2
+// This is the direct replacement for the previous mithril-lynx's
+// `test/renderer-integration.test.ts` — same intent, rewritten for this
 // architecture (see mithril-lynx-v2-desde-cero.md §F1's acceptance
 // criterion: this must pass from the first commit, never be fixed later).
 

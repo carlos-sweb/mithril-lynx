@@ -5,7 +5,7 @@ import { createVirtualBackend } from "../src/backends/virtual-backend.js";
 import { createLynxDocument } from "../src/fake-dom.js";
 import renderFactory from "mithril/render/render.js";
 
-// Tests the v2 plan's §3.6 hypothesis directly, WITHOUT a device: does
+// Tests the plan's §3.6 hypothesis directly, WITHOUT a device: does
 // re-rendering the SAME root/document with a structurally different tree
 // (a sibling inserted next to an unrelated, focused-in-spirit node) reuse
 // the unrelated node's id — i.e. does it survive as the SAME element,
@@ -20,7 +20,7 @@ import renderFactory from "mithril/render/render.js";
 // `<input>` keeps keyboard focus and in-progress text is a device-only
 // question (F4's real acceptance criterion).
 
-describe("structural re-render reuses unrelated nodes (v2 plan §3.6 hypothesis)", () => {
+describe("structural re-render reuses unrelated nodes (plan §3.6 hypothesis)", () => {
 	it("does not recreate a sibling `input`-like node when a new node is inserted next to it", () => {
 		const backend = createVirtualBackend();
 		const document = createLynxDocument(backend);
@@ -35,7 +35,7 @@ describe("structural re-render reuses unrelated nodes (v2 plan §3.6 hypothesis)
 		// Mithril's own (unkeyed-diff) middle-insertion trap to not apply —
 		// without keys, an unkeyed diff treats "insert in the middle" as
 		// "index 1 changed tag" and recreates everything from that index on,
-		// which is a real Mithril behavior, not a v2 bug. The un-keyed case
+		// which is a real Mithril behavior, not a bug here. The un-keyed case
 		// is deliberately NOT what this test asserts.
 		let showExtra = false;
 		function view() {

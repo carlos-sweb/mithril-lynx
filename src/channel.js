@@ -15,8 +15,8 @@
 // v1's renderer/background.js and renderer/main-thread.js dispatching to
 // and listening on each other via exactly this pairing.
 
-export const patchEventName = "MithrilLynxV2:Patch";
-export const eventFromMainThreadEventName = "MithrilLynxV2:Event";
+export const patchEventName = "MithrilLynx:Patch";
+export const eventFromMainThreadEventName = "MithrilLynx:Event";
 export const renderPageEventName = "__RenderPage";
 export const destroyLifetimeEventName = "__DestroyLifetime";
 

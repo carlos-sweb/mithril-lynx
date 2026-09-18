@@ -1,24 +1,26 @@
 // plugin.js
 //
 // Rspeedy/Rsbuild plugin wiring the two-bundle build (main-thread/Lepus +
-// background/JS) for mithril-lynx-v2 apps. Adapted from mithril-lynx v1's
-// plugin.js — this file is build TOOLING, not the redraw/reload mechanism
-// that motivated the v2 rewrite (see mithril-lynx-v2-desde-cero.md §2: v1's
-// bugs lived in the shim/commit/reload layer, never here), so it is reused
-// with fixes rather than rewritten from nothing. Two real changes from v1:
+// background/JS) for mithril-lynx apps. Adapted from the previous
+// mithril-lynx's plugin.js — this file is build TOOLING, not the
+// redraw/reload mechanism that motivated the rewrite (see
+// mithril-lynx-v2-desde-cero.md §2: the old bugs lived in the
+// shim/commit/reload layer, never here), so it is reused with fixes
+// rather than rewritten from nothing. Two real changes from the old one:
 //
 // 1. (F0.2 fix, the actual point of this file's existence in the plan)
 //    `RuntimeWrapperWebpackPlugin`'s `test` regex now also matches
-//    `.hot-update.js` chunks. v1's regex (`${name}/background\.js$`)
+//    `.hot-update.js` chunks. The old regex (`${name}/background\.js$`)
 //    matched the initial background ASSET path (nested under
 //    `.rspeedy/<name>/`, with a slash) but never the flat, double-
 //    underscore-named hot-update chunk (`<name>__background.<hash>.hot-
 //    update.js`) — confirmed with a plain regex test against both real
-//    filenames, not a guess. That gap is the entire reason v1 needed a
-//    runtime monkey-patch of `lynx.requireModuleAsync` in its dev-reload
-//    client; v2's client has no such patch (see src/dev-reload-client.js).
+//    filenames, not a guess. That gap is the entire reason the old
+//    version needed a runtime monkey-patch of `lynx.requireModuleAsync`
+//    in its dev-reload client; this one's client has no such patch (see
+//    src/dev-reload-client.js).
 //
-// 2. Only ONE rendering mode exists (v2 plan §2 non-goals: no main-thread-
+// 2. Only ONE rendering mode exists (plan §2 non-goals: no main-thread-
 //    owned/data-channel modes) — so there is no mode-detection logic here,
 //    `dev.hmr` is unconditionally on in dev, and every entry always gets a
 //    background chunk.
@@ -31,7 +33,7 @@ import { fileURLToPath } from "node:url";
 import { RuntimeWrapperWebpackPlugin } from "@lynx-js/runtime-wrapper-webpack-plugin";
 import { LynxEncodePlugin, LynxTemplatePlugin } from "@lynx-js/template-webpack-plugin";
 
-const PLUGIN_NAME = "mithril-lynx-v2-template-webpack";
+const PLUGIN_NAME = "mithril-lynx-template-webpack";
 const STYLE_CANDIDATES = ["style.css"];
 
 const DEV_RELOAD_CLIENT_PATH = path.join(
@@ -114,8 +116,9 @@ export function pluginMithrilLynx(options = {}) {
 		setup(api) {
 			api.expose(Symbol.for("LynxTemplatePlugin"), { LynxTemplatePlugin });
 
-			// One mode only -> dev.hmr is unconditionally on in dev (v1 had to
-			// detect renderer-mode-vs-not here; v2 has no "not").
+			// One mode only -> dev.hmr is unconditionally on in dev (the old
+			// version had to detect renderer-mode-vs-not here; there is no
+			// "not" to detect anymore).
 			api.modifyRsbuildConfig({
 				handler: (config, { mergeRsbuildConfig }) => mergeRsbuildConfig(config, { dev: { hmr: true } }),
 				order: "post",
@@ -134,13 +137,12 @@ export function pluginMithrilLynx(options = {}) {
 			});
 
 			api.modifyBundlerChain((chain, { isDev, environment }) => {
-				// Force a single resolved copy of "mithril-runtime" and
-				// "mithril-lynx-v2" — a `file:`-linked local package can
-				// otherwise resolve a second physical copy with its own
-				// module-level state (this exact class of bug bit v1 twice:
-				// mithril's emptyAttrs singleton, and mithril-lynx's own
-				// per-app render state — see mithril-lynx/plugin.js's
-				// comments for the on-device symptom).
+				// Force a single resolved copy of "mithril-runtime" — a
+				// `file:`-linked local package can otherwise resolve a
+				// second physical copy with its own module-level state
+				// (this exact class of bug bit the previous mithril-lynx:
+				// mithril's own emptyAttrs singleton, and that framework's
+				// own per-app render state).
 				try {
 					const appRequire = createRequire(path.join(process.cwd(), "package.json"));
 					const mithrilDir = path.dirname(appRequire.resolve("mithril-runtime/package.json"));
@@ -148,17 +150,16 @@ export function pluginMithrilLynx(options = {}) {
 				} catch {
 					// App has no local "mithril-runtime" resolvable from its own root.
 				}
-				// Note: v1 also force-aliased its OWN package name here (a
-				// second copy of mithril-lynx would mean two disconnected
-				// renderers with separate module-level state — see
-				// mithril-lynx/plugin.js's comment for the on-device
-				// symptom). v2's per-app state lives inside closures created
-				// by `renderApp()`/`setupRenderer()` calls, not module-level
-				// variables — same class of bug can't reappear the same way,
-				// so this dedup isn't reproduced here. Revisit if a
-				// multi-copy scenario (npm link, a component library
-				// nesting its own copy) turns up the same symptom in
-				// practice.
+				// Note: the old mithril-lynx also force-aliased its OWN
+				// package name here (a second copy would mean two
+				// disconnected renderers with separate module-level state).
+				// This framework's per-app state lives inside closures
+				// created by `renderApp()`/`setupRenderer()` calls, not
+				// module-level variables — the same class of bug can't
+				// reappear the same way, so this dedup isn't reproduced
+				// here. Revisit if a multi-copy scenario (npm link, a
+				// component library nesting its own copy) turns up the same
+				// symptom in practice.
 
 				const rawEntries = Object.entries(chain.entryPoints.entries() ?? {});
 				chain.entryPoints.clear();
@@ -174,8 +175,8 @@ export function pluginMithrilLynx(options = {}) {
 					const cssSource = findSibling(dir, STYLE_CANDIDATES);
 					if (bgSource == null) {
 						throw new Error(
-							`[mithril-lynx-v2] entry "${name}": no sibling background.ts/background.js found next to ${mtSource}. ` +
-								"mithril-lynx-v2 has exactly one rendering mode and it always needs a background entry — see the plan's §2 non-goals.",
+							`[mithril-lynx] entry "${name}": no sibling background.ts/background.js found next to ${mtSource}. ` +
+								"mithril-lynx has exactly one rendering mode and it always needs a background entry — see the plan's §2 non-goals.",
 						);
 					}
 
@@ -231,7 +232,7 @@ export function pluginMithrilLynx(options = {}) {
 					);
 
 					console.info(
-						`[mithril-lynx-v2:build] entry="${name}" hmr=true liveReload=${liveReload} ` +
+						`[mithril-lynx:build] entry="${name}" hmr=true liveReload=${liveReload} ` +
 							`bgEntry=${bgEntry} mtEntry=${mtEntry} targetSdk=${targetSdkVersion}`,
 					);
 				}

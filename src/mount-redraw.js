@@ -11,7 +11,7 @@
 //
 // Deliberately NOT a queue/pubsub of multiple mounted apps (real Mithril's
 // mount-redraw.js supports that because a browser page can `m.mount()`
-// several independent roots) — mithril-lynx-v2 has exactly one `renderApp()`
+// several independent roots) — mithril-lynx has exactly one `renderApp()`
 // for the app's whole lifetime (plan §3.1), so "the current redraw
 // function" is a single slot, not a list.
 //

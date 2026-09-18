@@ -13,8 +13,8 @@
 // content) is not a guess — it's the same contract `mithril-lynx/CONTRACT.md`
 // + `mithril-lynx/src/lynx-mithril-shim.js` already validated on a real
 // device (see mithril-lynx/DEVICE_VERIFICATION.md). Reusing a validated
-// mapping here is exactly the kind of "concept, not code" reuse the v2 plan
-// allows (§2 non-goals) — the bug we're rewriting away lives in the
+// mapping here is exactly the kind of "concept, not code" reuse the plan
+// allows (§2 non-goals) — the bug this rewrite fixes lives in the
 // commit/reload layer (commit.js, reload/*.js), never in this mapping.
 
 import { Op } from "./patch-protocol.js";
@@ -138,7 +138,7 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					// as a test failure rather than a mystery on-device.
 					if (name === "*") {
 						throw new Error(
-							"[mithril-lynx-v2] Clearing the whole `style` object at once is not implemented yet (F3 TODO) — set individual properties to \"\" instead.",
+							"[mithril-lynx] Clearing the whole `style` object at once is not implemented yet (F3 TODO) — set individual properties to \"\" instead.",
 						);
 					}
 					__AddInlineStyle(handles.get(id), name, "");
@@ -169,7 +169,7 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					break;
 				}
 				default:
-					throw new Error(`[mithril-lynx-v2] Unknown patch opcode: ${opcode}`);
+					throw new Error(`[mithril-lynx] Unknown patch opcode: ${opcode}`);
 			}
 		}
 		__FlushElementTree();
