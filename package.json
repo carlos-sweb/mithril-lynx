@@ -1,6 +1,6 @@
 {
   "name": "mithril-lynx",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Mithril.js on Lynx: real mithril/render/render.js driven through a Lynx-backed fake DOM, with an explicit single commit hook (no conditional global flush) and three reload modes (data-light, structural-light, full). A complete rewrite of the previous mithril-lynx (0.0.x).",
   "license": "MIT",
   "type": "module",
@@ -28,6 +28,10 @@
     "./mount-redraw": {
       "types": "./src/mount-redraw.d.ts",
       "default": "./src/mount-redraw.js"
+    },
+    "./testing": {
+      "types": "./src/testing.d.ts",
+      "default": "./src/testing.js"
     }
   },
   "scripts": {

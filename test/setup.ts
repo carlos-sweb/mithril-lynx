@@ -1,25 +1,9 @@
 // test/setup.ts
 //
-// The minimal gap-fill on top of @lynx-js/testing-environment's own PAPI
-// polyfill — same idea as the previous mithril-lynx's testing.js, scoped
-// down to only what apply-patch.js actually calls so far (no gestures/lists
-// yet, see the plan's non-goals). `@lynx-js/testing-environment` already
-// implements __CreateView/__CreateText/__CreateElement/__CreateRawText/
-// __AppendElement/__InsertElementBefore/__RemoveElement/__SetAttribute/
-// __SetClasses/__AddInlineStyle/__FlushElementTree/__GetElementUniqueID —
-// the one real gap is __AddEventListener (the testing environment only
-// implements the string/worklet-event __AddEvent family that ReactLynx
-// uses; mithril-lynx binds real JS function listeners directly).
+// This package's own tests use the exact same polyfill it now publishes
+// for everyone else (src/testing.js's installTestingPolyfills) — see that
+// file's header for what it covers and why.
 
-globalThis.onInjectMainThreadGlobals = (target: any) => {
-	target.lynx.getEngine = target.lynx.getNative;
+import { installTestingPolyfills } from "../src/testing.js";
 
-	target.__AddEventListener = (node: any, name: string, handler: (...args: unknown[]) => unknown) => {
-		node.__vanillaListeners ??= {};
-		(node.__vanillaListeners[name] ??= new Set()).add(handler);
-	};
-
-	target.__RemoveEventListener = (node: any, name: string, handler: unknown) => {
-		node.__vanillaListeners?.[name]?.delete(handler);
-	};
-};
+globalThis.onInjectMainThreadGlobals = installTestingPolyfills;
