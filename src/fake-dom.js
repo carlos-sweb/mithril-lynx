@@ -158,6 +158,12 @@ function createStyleProxy(element) {
 	});
 }
 
+// Module-level, not per-document: mirrors patch-protocol.js's own id spaces
+// (element ids are per-backend, but a gesture id only needs to be unique
+// within whatever set apply-patch.js's real __SetGestureDetector call sees
+// on the main thread — a single incrementing counter is simplest).
+let nextGestureId = 1;
+
 export class LynxElement extends LynxContainerNode {
 	constructor(ownerDocument, backend, tag, ns) {
 		super(ownerDocument);
@@ -252,6 +258,26 @@ export class LynxElement extends LynxContainerNode {
 
 	setAttributeNS(ns, name, value) {
 		this._backend.setAttributeNS(this._id, ns, name, value == null ? null : String(value));
+	}
+
+	/**
+	 * Registers a real native gesture detector on this element — see
+	 * patch-protocol.js's Op.SetGestureDetector for the design. `type` is
+	 * one of "pan"/"native"/... matching the native GestureType names.
+	 * `arenaPolicy` decides claim/release timing on the main thread; the
+	 * resulting touches-down/move/up events arrive back here as ordinary
+	 * "gesturedown"/"gesturemove"/"gestureup" events — add plain listeners
+	 * for those the same way as any other event. Returns an id to pass to
+	 * removeGestureDetector().
+	 */
+	setGestureDetector(type, arenaPolicy) {
+		const gestureId = nextGestureId++;
+		this._backend.setGestureDetector(this._id, gestureId, type, arenaPolicy);
+		return gestureId;
+	}
+
+	removeGestureDetector(gestureId) {
+		this._backend.removeGestureDetector(this._id, gestureId);
 	}
 
 	addEventListener(type, listener) {

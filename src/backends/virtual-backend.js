@@ -69,6 +69,12 @@ export function createVirtualBackend() {
 		removeEvent(id, type) {
 			pushOp(ops, Op.RemoveEvent, id, type);
 		},
+		setGestureDetector(id, gestureId, gestureType, arenaPolicy) {
+			pushOp(ops, Op.SetGestureDetector, id, gestureId, gestureType, arenaPolicy);
+		},
+		removeGestureDetector(id, gestureId) {
+			pushOp(ops, Op.RemoveGestureDetector, id, gestureId);
+		},
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {
 			if (ops.length === 0) return null;

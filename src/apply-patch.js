@@ -19,6 +19,155 @@
 
 import { Op } from "./patch-protocol.js";
 
+// --- Native gesture support (Op.SetGestureDetector) ------------------------
+//
+// See patch-protocol.js's own note and mithril-lynx-ui's
+// docs/native-papi/papi-05-native-gestures.md for the full design writeup.
+// Everything below runs on the MAIN thread, synchronously, inside a native
+// gesture callback — never on the background thread, and never waits on a
+// round trip to it. The arena-claim decision (arenaPolicy) is evaluated
+// here using only the event's own coordinates; the resulting touches-down/
+// move/up events are then forwarded to the background thread as ordinary
+// events (via `onEvent`, the exact same callback Op.AddEvent already uses),
+// so app code sees them as plain "gesturedown"/"gesturemove"/"gestureup"
+// listeners with no gesture-specific machinery of its own.
+
+const GESTURE_TYPE_CODES = { composed: -1, pan: 0, fling: 1, default: 2, tap: 3, longpress: 4, rotation: 5, pinch: 6, native: 7 };
+const GestureState = { active: 1, fail: 2, end: 3 };
+
+// Native does not call a gesture callback function directly — it calls a
+// global `runWorklet(ctx, params)`, looking up the real function by
+// `ctx._wkltId`. This is a real native requirement (confirmed on device by
+// this project's own predecessor, mithril-lynx v1's gesture.js), not
+// specific to any one package — every gesture callback has to be wrapped
+// through this registry before being handed to __SetGestureDetector.
+function ensureWorkletRuntime() {
+	if (globalThis.lynxWorkletImpl !== undefined) return;
+	globalThis.lynxWorkletImpl = { _workletMap: {} };
+	globalThis.registerWorklet = function (_type, id, fn) {
+		globalThis.lynxWorkletImpl._workletMap[id] = fn;
+	};
+	globalThis.runWorklet = function (ctx, params) {
+		if (typeof ctx !== "object" || ctx === null || !("_wkltId" in ctx)) return;
+		const fn = globalThis.lynxWorkletImpl._workletMap[ctx._wkltId];
+		if (typeof fn !== "function") return;
+		const args = Array.isArray(params) ? params : params != null ? [params] : [];
+		// A plain call, deliberately not .apply()/.call() — native's own
+		// `controller` argument throws if marshalled through either (same
+		// finding mithril-lynx v1's gesture.js already made).
+		return fn.bind(ctx)(...args);
+	};
+}
+
+let nextWorkletId = 1;
+function wrapWorkletCallback(fn) {
+	ensureWorkletRuntime();
+	const id = "mithril-lynx-gesture-" + nextWorkletId++;
+	globalThis.registerWorklet("main-thread", id, fn);
+	return { _wkltId: id };
+}
+
+/**
+ * A small, generic claim/release policy — covers the two real shapes this
+ * project's consumers need, not an arbitrary one:
+ *   - `{ mode: "claim" }` — claim on touches-down, never reconsider (a
+ *     single-axis drag with nothing else competing for the gesture).
+ *   - `{ mode: "axis-lock", axis: "horizontal" | "vertical", referenceMoves }`
+ *     — claim eagerly on touches-down, then on the move `referenceMoves + 1`
+ *     (0: decide using the down position as reference, right on the first
+ *     move; 1: use the first move's own position as reference and decide on
+ *     the second), release and fail the gesture if the dominant axis of the
+ *     resulting delta doesn't match `axis`.
+ * Unverified on a real device (no device access this session) — the claim
+ * timing (down vs. first/second move) mirrors what mithril-lynx v1's own
+ * device-verified sheet.js/swipe-action.js/swiper.js already did; the NEW
+ * part, evaluating it here instead of in app code, has not been confirmed
+ * to feel the same on-device.
+ */
+function createArenaTracker(policy) {
+	const mode = (policy && policy.mode) || "claim";
+	let refX = null;
+	let refY = null;
+	let movesSeen = 0;
+	let decided = false;
+
+	return {
+		onDown(x, y, consume) {
+			consume(true);
+			if (mode === "axis-lock" && (policy.referenceMoves || 0) === 0) {
+				refX = x;
+				refY = y;
+			}
+		},
+		onMove(x, y, consume, fail) {
+			if (mode !== "axis-lock" || decided) return;
+			if ((policy.referenceMoves || 0) === 1 && movesSeen === 0) {
+				refX = x;
+				refY = y;
+				movesSeen++;
+				return;
+			}
+			movesSeen++;
+			if (refX == null) return;
+			const dx = x - refX;
+			const dy = y - refY;
+			if (dx === 0 && dy === 0) return; // not enough signal yet
+			decided = true;
+			const isHorizontal = Math.abs(dx) >= Math.abs(dy);
+			const wins = policy.axis === "horizontal" ? isHorizontal : !isHorizontal;
+			if (wins) consume(true);
+			else fail();
+		},
+	};
+}
+
+function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent) {
+	const tracker = createArenaTracker(arenaPolicy);
+	const gestureTypeCode = typeof gestureType === "string" ? GESTURE_TYPE_CODES[gestureType] : gestureType;
+
+	function consume(controller, shouldClaim) {
+		if (controller != null && typeof controller.__ConsumeGesture === "function") {
+			controller.__ConsumeGesture(handle, gestureId, { consume: shouldClaim, inner: false });
+		}
+	}
+	function fail(controller) {
+		if (controller != null && typeof controller.__SetGestureState === "function") {
+			controller.__SetGestureState(handle, gestureId, GestureState.fail);
+		}
+	}
+	function coordsOf(event) {
+		const p = (event && event.params) || {};
+		return { clientX: p.clientX, clientY: p.clientY };
+	}
+
+	const callbacks = {
+		onTouchesDown: (event, controller) => {
+			const { clientX, clientY } = coordsOf(event);
+			tracker.onDown(clientX, clientY, (claim) => consume(controller, claim));
+			onEvent?.(id, "gesturedown", { clientX, clientY });
+		},
+		onTouchesMove: (event, controller) => {
+			const { clientX, clientY } = coordsOf(event);
+			tracker.onMove(clientX, clientY, (claim) => consume(controller, claim), () => fail(controller));
+			onEvent?.(id, "gesturemove", { clientX, clientY });
+		},
+		onTouchesUp: (event) => {
+			const { clientX, clientY } = coordsOf(event);
+			onEvent?.(id, "gestureup", { clientX, clientY });
+		},
+	};
+
+	__SetAttribute(handle, "has-react-gesture", true);
+	__SetAttribute(handle, "flatten", false);
+	__SetGestureDetector(
+		handle,
+		gestureId,
+		gestureTypeCode,
+		{ callbacks: Object.keys(callbacks).map((name) => ({ name, callback: wrapWorkletCallback(callbacks[name]) })) },
+		{},
+	);
+}
+
 /**
  * @param {number} pageId - `__GetElementUniqueID(pageElement)` of the real
  *   page this applier is attached to. Every element this applier creates
@@ -175,6 +324,22 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					// listeners outside of removing the whole element).
 					// Left as an explicit no-op + TODO rather than a guess.
 					i += 2;
+					break;
+				}
+				case Op.SetGestureDetector: {
+					const id = ops[i++];
+					const gestureId = ops[i++];
+					const gestureType = ops[i++];
+					const arenaPolicy = ops[i++];
+					const handle = handles.get(id);
+					registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent);
+					break;
+				}
+				case Op.RemoveGestureDetector: {
+					const id = ops[i++];
+					const gestureId = ops[i++];
+					const handle = handles.get(id);
+					if (typeof __RemoveGestureDetector === "function") __RemoveGestureDetector(handle, gestureId);
 					break;
 				}
 				default:

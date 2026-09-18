@@ -28,6 +28,20 @@ export const Op = Object.freeze({
 	SetText: 11, // id, value (nodeValue on a text node)
 	AddEvent: 12, // id, type
 	RemoveEvent: 13, // id, type
+	// gestureId, gestureType, arenaPolicy — registers a real native gesture
+	// detector on the main thread. arenaPolicy is a small, JSON-serializable
+	// description of when to claim/release the gesture arena, evaluated
+	// synchronously on the main thread against just the event's own
+	// coordinates (no background-thread round trip) — see
+	// docs/native-papi/papi-05-native-gestures.md in mithril-lynx-ui for
+	// the full design writeup and why this is deliberately narrower than a
+	// generic remote-controller RPC. Resulting onTouchesDown/Move/Up events
+	// are forwarded to the background thread as plain events (type
+	// "gesturedown"/"gesturemove"/"gestureup"), through the exact same
+	// channel any other native event already uses — nothing new on the
+	// background-thread side.
+	SetGestureDetector: 14, // id, gestureId, gestureType, arenaPolicy
+	RemoveGestureDetector: 15, // id, gestureId
 });
 
 /**
