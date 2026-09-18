@@ -130,6 +130,7 @@ class LynxContainerNode extends LynxNode {
 function createStyleProxy(element) {
 	const methods = {
 		setProperty(name, value) {
+			element._styleEverSet = true;
 			element._backend.setStyleProperty(element._id, name, String(value));
 		},
 		removeProperty(name) {
@@ -149,6 +150,7 @@ function createStyleProxy(element) {
 			if (value === "" || value == null) {
 				element._backend.removeStyleProperty(element._id, name);
 			} else {
+				element._styleEverSet = true;
 				element._backend.setStyleProperty(element._id, name, String(value));
 			}
 			return true;
@@ -165,6 +167,7 @@ export class LynxElement extends LynxContainerNode {
 		this._id = ns ? backend.createElementNS(ns, tag) : backend.createElement(tag);
 		ownerDocument._nodesById.set(this._id, this);
 		this._style = null;
+		this._styleEverSet = false;
 		this._listeners = Object.create(null);
 		// `hasPropertyKey` (CONTRACT.md §e) requires `"value" in vnode.dom` etc.
 		// to be true for the property-write fast path to apply to form
@@ -182,11 +185,20 @@ export class LynxElement extends LynxContainerNode {
 	set style(value) {
 		if (value == null || value === "") {
 			// `element.style = ""` (CONTRACT.md §f, lines 750-752): clear.
-			// We don't track which properties were set, so this relies on the
-			// backend/native side treating a style-reset op as "clear all" —
-			// see backends/virtual-backend.js `Op.SetStyleProperty` with a
-			// name of `*`.
-			this._backend.removeStyleProperty(this._id, "*");
+			// render.js's own updateStyle() calls this UNCONDITIONALLY right
+			// before applying an object style, even on an element that never
+			// had any style at all (its "old is missing or a string, style is
+			// an object" branch — see mithril-runtime/render/render.js) — so
+			// without this guard, EVERY component with a plain object style
+			// prop (an extremely common pattern, not an edge case) would hit
+			// apply-patch.js's "bulk-clear not implemented" throw on its very
+			// first render. `_styleEverSet` (set by createStyleProxy whenever
+			// a real property is written) is exactly "was there anything to
+			// clear" — skip emitting the op at all when there wasn't; the
+			// throw still fires for the genuine case (an update actually
+			// replacing a previously-set style), where a real bulk-clear PAPI
+			// call would actually be needed and hasn't been validated yet.
+			if (this._styleEverSet) this._backend.removeStyleProperty(this._id, "*");
 			return;
 		}
 		if (typeof value !== "object") {
