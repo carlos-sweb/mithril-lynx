@@ -135,25 +135,30 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
 			controller.__SetGestureState(handle, gestureId, GestureState.fail);
 		}
 	}
+	// timestamp: a real field native's own touch/gesture params already
+	// carry (mithril-lynx v1's gesture consumers already read
+	// event.params.timestamp for velocity calculations) — forwarded as-is
+	// rather than having a consumer approximate it from receipt time on
+	// the background thread, which would fold cross-thread forwarding
+	// latency into a velocity computation.
 	function coordsOf(event) {
 		const p = (event && event.params) || {};
-		return { clientX: p.clientX, clientY: p.clientY };
+		return { clientX: p.clientX, clientY: p.clientY, timestamp: p.timestamp };
 	}
 
 	const callbacks = {
 		onTouchesDown: (event, controller) => {
-			const { clientX, clientY } = coordsOf(event);
-			tracker.onDown(clientX, clientY, (claim) => consume(controller, claim));
-			onEvent?.(id, "gesturedown", { clientX, clientY });
+			const coords = coordsOf(event);
+			tracker.onDown(coords.clientX, coords.clientY, (claim) => consume(controller, claim));
+			onEvent?.(id, "gesturedown", coords);
 		},
 		onTouchesMove: (event, controller) => {
-			const { clientX, clientY } = coordsOf(event);
-			tracker.onMove(clientX, clientY, (claim) => consume(controller, claim), () => fail(controller));
-			onEvent?.(id, "gesturemove", { clientX, clientY });
+			const coords = coordsOf(event);
+			tracker.onMove(coords.clientX, coords.clientY, (claim) => consume(controller, claim), () => fail(controller));
+			onEvent?.(id, "gesturemove", coords);
 		},
 		onTouchesUp: (event) => {
-			const { clientX, clientY } = coordsOf(event);
-			onEvent?.(id, "gestureup", { clientX, clientY });
+			onEvent?.(id, "gestureup", coordsOf(event));
 		},
 	};
 
