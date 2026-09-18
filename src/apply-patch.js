@@ -115,8 +115,16 @@ function createArenaTracker(policy) {
 			decided = true;
 			const isHorizontal = Math.abs(dx) >= Math.abs(dy);
 			const wins = policy.axis === "horizontal" ? isHorizontal : !isHorizontal;
-			if (wins) consume(true);
-			else fail();
+			if (wins) {
+				consume(true);
+			} else {
+				// Release the claim touches-down made eagerly, THEN fail —
+				// both, not just the latter: a bare fail() with the arena
+				// still marked "claimed" would keep blocking an ancestor
+				// (e.g. a <scroll-view>) from ever seeing this touch.
+				consume(false);
+				fail();
+			}
 		},
 	};
 }

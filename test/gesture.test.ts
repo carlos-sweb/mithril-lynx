@@ -100,8 +100,12 @@ describe("Op.SetGestureDetector (native gesture support)", () => {
 		callbacks.onTouchesDown(touchEvent(0, 0), controller);
 		callbacks.onTouchesMove(touchEvent(5, 40), controller); // mostly vertical
 
-		expect(controller.calls.map((c) => c.fn)).toEqual(["__ConsumeGesture", "__SetGestureState"]);
-		expect(controller.calls[1].args[2]).toBe(2); // GestureState.fail (args: [handle, gestureId, state])
+		// Claim eagerly on down, release once the axis loses, THEN fail —
+		// releasing the claim before failing matters: an ancestor (e.g. a
+		// <scroll-view>) must see the arena freed, not just "this gesture gave up".
+		expect(controller.calls.map((c) => c.fn)).toEqual(["__ConsumeGesture", "__ConsumeGesture", "__SetGestureState"]);
+		expect(controller.calls[1].args[2]).toEqual({ consume: false, inner: false });
+		expect(controller.calls[2].args[2]).toBe(2); // GestureState.fail (args: [handle, gestureId, state])
 	});
 
 	it('"axis-lock" (referenceMoves: 1) uses the first move as reference and decides on the second', () => {
