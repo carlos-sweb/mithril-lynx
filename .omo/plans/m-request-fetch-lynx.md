@@ -1,43 +1,53 @@
 # Plan — `m.request` para mithril-lynx-v2: ¿alcanza el `fetch` de Lynx?
 
-> Estado: **INVESTIGACIÓN COMPLETA, veredicto emitido — implementación NO
-> iniciada.** Idioma: español. Insumo de las 2 tareas solicitadas: (1)
-> cómo se hace fetch en Lynx, (2) si el `fetch` de Lynx cumple lo que
-> `m.request` (spec: <https://mithril.js.org/request.html>) espera.
-> Fuentes: doc oficial de Mithril, doc oficial de Lynx
-> (`lynxjs.org/api/lynx-api/global/fetch.html`), **los `.d.ts` reales
-> instalados** de `@lynx-js/types` (evidencia de tipos, no solo prosa de
-> doc), y el código fuente real de `m.request`
-> (`node_modules/mithril/request/request.js`, 199 líneas).
+> Estado (2026-09-18): **Investigación + spike en device COMPLETOS,
+> veredicto corregido con evidencia real — implementación NO iniciada.**
+> Idioma: español. Insumo de las 2 tareas solicitadas: (1) cómo se hace
+> fetch en Lynx, (2) si el `fetch` de Lynx cumple lo que `m.request`
+> (spec: <https://mithril.js.org/request.html>) espera. Fuentes: doc
+> oficial de Mithril, doc oficial de Lynx
+> (`lynxjs.org/api/lynx-api/global/fetch.html`), los `.d.ts` instalados de
+> `@lynx-js/types`, el código fuente real de `m.request`
+> (`node_modules/mithril/request/request.js`, 199 líneas), **y las 4
+> preguntas del spike respondidas en un device real conectado** (ver §4 —
+> **los tipos mentían en dos de los cuatro puntos**: `AbortController`/
+> `AbortSignal`/`Headers` SÍ existen y funcionan en runtime pese a no
+> estar declarados en `@lynx-js/types`).
 
 ---
 
 ## Veredicto (primero, para no enterrarlo)
 
-**Gap grande, pero no total.** Hay un subconjunto real y útil de
-`m.request` (GET/POST con JSON, params en la URL, headers, `deserialize`/
-`extract`/`type`, el flag `background`, y la forma del error) que **sí se
-puede replicar fielmente** sobre el `fetch` de Lynx. Pero varias opciones
-de `m.request` dependen de mecanismos que **no existen en absoluto** en
-Lynx — no es "distinto nombre, mismo poder", es **ausencia real** en el
-propio archivo de tipos oficial (`@lynx-js/types`), no solo en la prosa de
-la doc:
+**El gap es más chico de lo que sugerían los tipos instalados —
+cancelación y timeout reales SÍ son posibles.** El spike en device
+(§4) corrigió dos de las cuatro preguntas abiertas en la dirección
+optimista: `@lynx-js/types` no declara `AbortController`, pero el device
+real lo tiene, funciona spec-compliant, y **cancela la conexión de
+verdad** (probado: abort a los 800ms de una respuesta que tarda 5000ms →
+la promesa rechazó a los 805ms, no a los 5000ms — no es un timeout de
+mentira que espera igual). Eso cambia la lista de "imposible" a una lista
+más corta:
 
-- `config(xhr) => xhr` (el escape hatch de la API real) — no tiene
+- `config(xhr) => xhr` (el escape hatch de la API real) — sigue sin
   traducción posible: `fetch` no expone un objeto vivo para mutar a mitad
-  de vuelo.
-- Cancelación (`xhr.abort()`) — `RequestInit` de Lynx no tiene campo
-  `signal`, y **no existe `AbortController`/`AbortSignal` en
-  `@lynx-js/types`, en ningún lado**.
+  de vuelo. Esto no lo arregla el spike.
 - `FormData`/`URLSearchParams` como body — la doc de Lynx dice
-  explícitamente que no están soportados.
+  explícitamente que no están soportados (no se re-probó en device, la
+  doc + los tipos coinciden en esto, suficiente certeza).
 - `responseType: "blob"` — `Body` en Lynx solo tiene `arrayBuffer()`,
   `json()`, `text()`. Sin `.blob()`.
-- `timeout` nativo — sin campo en `RequestInit`, y sin `AbortController`
-  para implementarlo bien tampoco (ver §4).
 - `withCredentials`, `user`/`password` (auth básica vía `xhr.open`),
   `async: false` (modo síncrono) — conceptos exclusivos de
-  XMLHttpRequest/browser, sin sentido o sin equivalente en Lynx.
+  XMLHttpRequest/browser, sin sentido o sin equivalente en Lynx. Además,
+  **`btoa`/`atob` confirmados ausentes en runtime** (spike §4) — armar el
+  header `Authorization: Basic` a mano necesitaría una implementación
+  propia de base64, no solo un one-liner.
+- **Cancelación y timeout**: YA NO están en la lista de imposibles —
+  `AbortController` funciona de verdad (§4). Un `m.request` de v2 puede
+  ofrecer cancelación real y un `timeout` que efectivamente corta la
+  conexión, no una promesa que se rinde mientras la red sigue trabajando
+  de fondo (que era el peor escenario que planteaba la versión anterior de
+  este documento).
 
 **Recomendación**: implementar un `m.request` de v2 que cubra el caso
 común (lo que de verdad usa el 90% de las apps: JSON in/out, params,
@@ -83,19 +93,24 @@ esta pieza.
   es fiel al spec real de `Response`.
 - **Ni `Headers` ni `AbortController` están declarados en
   `@lynx-js/types`** — se usan como tipos referenciados
-  (`HeadersInit`, futuro `signal`) pero **no existen como constructor/clase
-  en ningún `.d.ts` del paquete**. Esto es una zona gris a confirmar en
-  device (§5, spike): ¿existe `Headers` en runtime aunque no esté tipado
-  (algo común en engines embebidos), o directamente no existe?
+  (`HeadersInit`, futuro `signal`) pero no existen como constructor/clase
+  en ningún `.d.ts` del paquete. **Confirmado en device (§4): los tipos
+  mienten acá — ambos existen y funcionan en runtime.** Los tipos de
+  `@lynx-js/types` están incompletos/desactualizados en este punto, no son
+  la fuente de verdad final — un recordatorio general para el resto de
+  este proyecto, no solo para `m.request`.
 - Confirmado por la doc oficial en texto plano: *"Lynx does not support
   Web-only features like: CORS, redirect, keepalive related APIs.
   FormData/Blob related APIs are not supported."*
-- `fetch` mismo llega como variable global inyectada al bundle de
-  background — ya lo sabíamos de otro lado: `RuntimeWrapperWebpackPlugin`
-  (el mismo plugin que usa `mithril-lynx-v2/plugin.js`) trae `fetch` en su
-  lista `defaultInjectVars`, así que no hace falta ni `import`/`require`
-  ni acceder vía `lynx.fetch()` explícito — es un global normal, igual que
-  en el navegador.
+- **`fetch` NO es un global usable — hay que llamar `lynx.fetch(...)`
+  explícito.** Corrección respecto a una suposición anterior de este
+  documento: aunque `RuntimeWrapperWebpackPlugin` incluye `"fetch"` en su
+  lista `defaultInjectVars`, el spike en device (§4) confirmó
+  `typeof fetch === "undefined"` mientras `typeof lynx.fetch ===
+  "function"` en el mismo contexto. `indicadores-app` (la app de
+  referencia que el usuario señaló) ya usa `lynx.fetch(...)` por esta
+  misma razón — coincide con la evidencia del spike, no es una casualidad
+  de esa app.
 
 ## 2. El contrato real de `m.request` (lo que hay que igualar o declarar no soportado)
 
@@ -116,8 +131,8 @@ doc — el código real):
 | `background` | si es `true`, salta el redraw automático | **Sí** — es lógica pura nuestra (mount-redraw), no toca XHR/fetch para nada |
 | Forma del error (`error.code`, `.message`, `.response`) | de `xhr.status`/`xhr.responseText` | **Sí** — `response.status`, `response.statusText`, mismo body ya extraído |
 | `config(xhr) => xhr` | mutar el XHR vivo antes de `.send()` | **No hay traducción real** — lo más cercano es un `config(requestInit) => requestInit` que mute el `RequestInit` ANTES de llamar `fetch()`, pero es una firma y un momento distintos; código que use `config` para engancharse a `xhr.onprogress`, reemplazar el XHR, etc. **no tiene forma de portarse** |
-| `timeout` | `xhr.timeout` nativo, aborta la conexión real | **No fielmente** — sin `AbortController` en Lynx, un timeout hecho con `Promise.race` rechaza la promesa en el tiempo esperado, pero **el fetch real sigue viajando por la red sin cancelarse** — comportamiento observable distinto (ver §4) |
-| Cancelación (`.abort()` vía `config`) | `xhr.abort()` | **No** — sin `AbortController`/`AbortSignal` en los tipos de Lynx, no hay forma de cancelar un fetch en vuelo |
+| `timeout` | `xhr.timeout` nativo, aborta la conexión real | **Sí, de verdad** — `AbortController` + `lynx.setTimeout(() => ctrl.abort(), ms)` **cancela la conexión real**, confirmado en device (§4): abort a los 800ms de una respuesta de 5000ms rechazó a los 805ms, no a los 5000ms. Firma distinta a `xhr.timeout` (hay que armar el controller nosotros) pero el resultado observable es el mismo |
+| Cancelación (`.abort()` vía `config`) | `xhr.abort()` | **Sí** — `AbortController`/`AbortSignal` existen y funcionan en runtime pese a no estar en `@lynx-js/types` (confirmado en device, §4). `m.request` de v2 puede exponer su propio `.abort()`/aceptar un `signal` propio |
 | `withCredentials` | `xhr.withCredentials = true` (cookies cross-origin) | **No aplica** — Lynx no tiene modelo de origen/CORS; la opción quedaría como no-op silencioso si se acepta tal cual |
 | `user`/`password` | pasados a `xhr.open(...)`, auth básica HTTP | **No hay equivalente directo** — habría que armar el header `Authorization: Basic ...` a mano, y eso requiere `btoa()`, cuya disponibilidad en Lynx no está confirmada (no se investigó en esta sesión) |
 | `async: false` (modo síncrono) | `xhr.open(..., false, ...)` | **Imposible** — no existe un `fetch` síncrono en ningún entorno, browser o Lynx |
@@ -131,36 +146,82 @@ falta buscarlo:
 - `config` cambia de firma (`RequestInit`, no `XMLHttpRequest`) — código
   portado de un `m.request` real que use `config` para algo más que setear
   un header necesita revisión manual, no es un cambio de import.
-- No hay cancelación de requests en vuelo (ni por API propia ni por
-  `config`).
-- No hay `timeout` con corte real de la conexión — como mucho, "dejar de
-  esperar" sin cancelar el trabajo de red de fondo (documentado como una
-  degradación conocida, ver §4 para la decisión exacta).
 - Sin soporte de `FormData`/`URLSearchParams`/`Blob` — cualquier caso de
   subida de archivos o multipart queda fuera de alcance por completo.
-- Sin `withCredentials`, sin `user`/`password` — si hace falta auth
-  básica, armar el header `Authorization` manualmente en `headers`.
-- Sin modo síncrono (`async: false`).
+- Sin `withCredentials` (no aplica, Lynx no tiene modelo de CORS/origen) y
+  sin `user`/`password` inline — si hace falta auth básica, armar el
+  header `Authorization` a mano (y una función de base64 propia, ya que
+  `btoa` no existe — confirmado en device, §4).
+- Sin modo síncrono (`async: false`) — no existe en ningún fetch, browser
+  o Lynx.
+- `response.url`/`response.redirected` no reflejan la URL final tras un
+  redirect (confirmado en device, §4) — si el código de la app depende de
+  saber a qué URL terminó yendo la request tras redirects, esto no
+  funciona igual que en un browser real.
+- `Headers.get()` no confirmado como confiable para LEER de vuelta
+  (ver §4, hallazgo extra) — construir/enviar headers con `new Headers()`
+  sí funciona.
 
-## 4. Puntos que necesitan un spike en device antes de programar nada
+**Ya NO son no-objetivos** (el spike de §4 los movió a la columna de "sí
+se puede"): cancelación de requests en vuelo, y `timeout` con corte real
+de la conexión — ambos funcionan de verdad vía `AbortController`.
 
-1. **¿Existe `Headers` como constructor en runtime, aunque no esté en los
-   `.d.ts`?** Los tipos no lo declaran, pero eso no prueba que el motor
-   real tampoco lo tenga (paquetes de tipos quedan desactualizados o
-   incompletos). Probar `typeof Headers` en el hilo background de un
-   device real.
-2. **¿Qué pasa con una respuesta 3xx (redirect)?** La doc dice "no soporta
-   redirect" pero no dice qué pasa en la práctica: ¿el fetch de Lynx sigue
-   el redirect igual (como XHR, transparente) o falla/devuelve la
-   respuesta 3xx cruda? Esto cambia si hace falta advertir sobre esto o
-   no.
-3. **¿`btoa`/`atob` existen en el hilo background?** Necesario si se
-   decide ofrecer un helper de auth básica en vez de dejarlo 100% a mano
-   del usuario.
-4. **Confirmar si `AbortController` existe en runtime pese a no estar
-   tipado** — de existir, cambia el veredicto de "timeout real
-   imposible" a "timeout real posible, solo falta tipar la firma
-   nosotros mismos en el `.d.ts` de v2".
+## 4. Spike en device — las 4 preguntas, respondidas (2026-09-18, adb R8YYC0VV0PV)
+
+Corrido con `agent-lynx evaluate` contra el background thread de
+`mithril-lynx-v2-app` en el device conectado — no contra
+`indicadores-app` (el usuario señaló esa app como referencia de que
+"fetch funciona ahí", y es cierto, pero solo ejercita el camino feliz
+básico: `lynx.fetch(url)` + `.ok` + `.json()`, sin tocar ninguna de las
+4 preguntas de este spike).
+
+**Nota de herramienta**: `agent-lynx evaluate` espera una única
+EXPRESIÓN, no una secuencia de sentencias con `;` — expresiones con
+`;` al nivel superior tiran `SyntaxError: expecting ')'` desde el wrapper
+interno de la herramienta. Solución: envolver todo en un IIFE
+`(function(){ ...sentencias...; return valor; })()`, que sí es una sola
+expresión. Documentado acá para la próxima sesión que use este spike.
+
+1. **¿Existe `Headers`/`AbortController`/`AbortSignal` en runtime pese a
+   no estar en `@lynx-js/types`?** `typeof Headers` → `"function"`,
+   `typeof AbortController` → `"function"`, `typeof AbortSignal` →
+   `"function"`. **Los tres existen.** Los tipos instalados están
+   incompletos en este punto, no son la fuente de verdad final.
+2. **¿Qué pasa con un 3xx?** `lynx.fetch("https://httpbin.org/redirect-to?url=https://example.com")`
+   devolvió `status: 200`, `ok: true`, y el body fue el HTML real de
+   `example.com` — **Lynx sigue el redirect solo**, transparente, como un
+   browser real. Pero `response.url` quedó con la URL ORIGINAL
+   (`httpbin.org/redirect-to?...`), no la final — y `response.redirected`
+   vino `undefined`. El redirect en sí funciona; los metadatos sobre el
+   redirect no son confiables.
+3. **¿Existen `btoa`/`atob`?** `typeof btoa` → `"undefined"`, `typeof atob`
+   → `"undefined"`. **Confirmado ausentes.** Un helper de auth básica
+   necesitaría una implementación propia de base64.
+4. **¿`AbortController` funciona de verdad (no solo existe)?** Sí,
+   spec-compliant: `ctrl.abort()` inmediato → la promesa rechaza con
+   `{name: "AbortError", message: "This operation was aborted"}`.
+   Prueba más fuerte — abort a mitad de vuelo: `lynx.fetch(".../delay/5",
+   {signal: ctrl.signal})` + `lynx.setTimeout(() => ctrl.abort(), 800)` →
+   la promesa rechazó a los **805ms**, no a los 5000ms del delay real del
+   servidor — **la conexión se cortó de verdad**, no fue una promesa que
+   se rindió mientras la red seguía trabajando.
+
+**Hallazgo extra, no una de las 4 preguntas originales pero relevante**:
+`fetch` global (bare, sin `lynx.`) es `undefined` — hay que llamar
+`lynx.fetch(...)` siempre. Se había asumido lo contrario en una versión
+anterior de este documento (por estar `"fetch"` en la lista
+`defaultInjectVars` de `RuntimeWrapperWebpackPlugin`) — el spike lo
+corrigió. Coincide con que `indicadores-app` (la app que el usuario
+señaló) ya usa `lynx.fetch(...)` explícito, no por casualidad.
+
+Segundo hallazgo extra: `new Headers({...})` pasado a
+`fetch(url, {headers})` **sí llega bien al servidor** (confirmado con
+`https://httpbin.org/headers`, que devuelve de vuelta los headers que
+recibió) — pero `headersInstance.get("x-test")` sobre esa misma instancia
+devolvió `null` en vez del valor puesto. Construir/enviar headers
+funciona; leer de una instancia de `Headers` con `.get()` no se puede dar
+por confiable sin una segunda vuelta de investigación (no bloqueante para
+`m.request`, que nunca necesita leer una `Headers` que armó él mismo).
 
 ## 5. Si se decide implementar: forma concreta (fase futura, no esta sesión)
 
@@ -189,6 +250,17 @@ casos cubrir, con las opciones de la tabla de §2 marcadas como
 decide si se llama al único `performRender`/commit de la app
 (`background.js`) al resolver la promesa — reusa el mismo mecanismo,
 no inventa un segundo camino de redraw.
+
+**Cancelación/timeout** (nuevo respecto a la versión anterior de este
+plan, gracias al spike de §4): cada llamada arma su propio
+`AbortController` internamente. `timeout` (si se pasa) hace
+`lynx.setTimeout(() => ctrl.abort(), timeout)` y limpia el timer si la
+promesa ya resolvió. La función devuelta por `request(...)` puede colgar
+un `.abort()` propio (no existe en la promesa real de mithril, pero es
+gratis tenerlo acá y es justo lo que un "mithril fan" pediría después de
+la falta de `config`) que llama `ctrl.abort()` directo — capacidad nueva
+que ni el `m.request` real ofrece de forma tan directa (ahí hay que pasar
+por `config` para llegar al `xhr.abort()`).
 
 ## 6. Referencias
 
