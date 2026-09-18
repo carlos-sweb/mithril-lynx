@@ -53,6 +53,14 @@ renderApp({ root: () => m(Counter) });
 
 `m.request`, reimplemented as a wrapper over Lynx's own `fetch`. See [`REQUEST.md`](./REQUEST.md) for the full API, and [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md) for the complete option-by-option gap analysis against the real `m.request` spec, backed by real-device evidence rather than docs/types alone (which were wrong twice during that investigation).
 
+## Custom fonts
+
+Use a plain CSS `@font-face` rule — not `lynx.addFont()` (that JS API only fires post-mount, too late to win the first-frame race). Three gotchas, all confirmed on real hardware and inherited unchanged from the previous mithril-lynx (none of this is architecture-specific):
+
+- **The font file must be `.ttf`, not `.woff2`** — a `.woff2` `@font-face` compiles fine but the native text renderer silently never applies it.
+- **`font-family` set on `:root` (or any ancestor) does not cascade to descendants by default** — `pluginLynxConfig({ enableCSSInheritance: true })` turns that on.
+- **A declarative `@font-face` resolves synchronously on the first native `__FlushElementTree()` call**, and that cost scales with how many text nodes resolve it — up to +2s of cold start on a mid/low-end device. Filed upstream as [lynx-family/lynx#9431](https://github.com/lynx-family/lynx/issues/9431). The workaround is a native-side prefetch hook, not a JS-level fix — see [`ANDROID_APK_GUIDE.md`](./ANDROID_APK_GUIDE.md) Part D for the full procedure, or scaffold it directly with `create-mithril-lynx`'s `--with-font <file.ttf>` flag.
+
 ## Known gaps
 
 - **`m.trust`** — not present. Stripped from `mithril-runtime` at the source, and Lynx's Element PAPI has no innerHTML-equivalent injection point to reimplement it against anyway (same permanent gap v1 documented).
@@ -72,3 +80,4 @@ Runs against `@lynx-js/testing-environment`'s real Element PAPI simulation via `
 - `.omo/plans/m-route-en-memoria.md` — how `m.route` was designed and verified for an in-memory, URL-less environment.
 - `.omo/plans/m-request-fetch-lynx.md` — the `m.request`-vs-`fetch` investigation plan and its execution log.
 - [`ROUTE.md`](./ROUTE.md), [`REQUEST.md`](./REQUEST.md), [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md) — user-facing reference docs for the two Lynx-specific reimplementations.
+- [`ANDROID_APK_GUIDE.md`](./ANDROID_APK_GUIDE.md) — building a native Android host and APK from scratch, Gradle-CLI only, including the `.ttf` cold-start hack from "Custom fonts" above. Automated end to end by `create-mithril-lynx --android`.
