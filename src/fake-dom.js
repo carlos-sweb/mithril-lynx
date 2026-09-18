@@ -65,6 +65,15 @@ class LynxContainerNode extends LynxNode {
 		return this._children[0] ?? null;
 	}
 
+	// Real Mithril's render.js reads `fragment.childNodes.length` right
+	// after `insertDOM`'ing a multi-node children list into a
+	// `createDocumentFragment()` (createNodes' fragment-batching path) — a
+	// real DOM's `childNodes` is a live NodeList, but render.js only ever
+	// reads `.length` off it here, so the plain backing array is enough.
+	get childNodes() {
+		return this._children;
+	}
+
 	contains(other) {
 		let node = other;
 		while (node) {
