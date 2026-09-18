@@ -298,6 +298,13 @@ export class LynxText extends LynxNode {
 	constructor(ownerDocument, backend, text) {
 		super(ownerDocument);
 		this._backend = backend;
+		// Mithril's render.js never reads `.nodeValue` back itself (it only
+		// ever WRITES it, on an update pass — see render.js's own updateText),
+		// so this had no effect on real rendering; it only broke anything
+		// ELSE reading a freshly-created text node's value before its first
+		// update (found writing a real device-verification test for
+		// mithril-lynx-ui — see that repo's test/v2-harness.ts).
+		this._text = text;
 		this._id = backend.createText(text);
 	}
 
