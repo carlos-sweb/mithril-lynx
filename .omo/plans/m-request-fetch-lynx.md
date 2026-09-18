@@ -1,7 +1,15 @@
 # Plan — `m.request` para mithril-lynx-v2: ¿alcanza el `fetch` de Lynx?
 
 > Estado (2026-09-18): **Investigación + spike en device COMPLETOS,
-> veredicto corregido con evidencia real — implementación NO iniciada.**
+> implementación COMPLETA y verificada en device real.** `src/request.js`
+> + `src/mount-redraw.js` implementados, 24 tests unitarios (fake fetch)
+> pasando, y verificación end-to-end contra `lynx.fetch` real en
+> `mithril-lynx-v2-app` (`src/screens/fetch-demo.ts`) confirmando GET real
+> a `httpbin.org/json` con redraw automático. Investigación completa
+> consolidada en [`FETCH_INVESTIGATION.md`](../../FETCH_INVESTIGATION.md)
+> (incluye un bug de plataforma nuevo, no anticipado en el spike inicial:
+> `lynx.setTimeout`/`requestAnimationFrame` no esperan a que la cola de
+> microtasks drene — §4.6 de ese documento).
 > Idioma: español. Insumo de las 2 tareas solicitadas: (1) cómo se hace
 > fetch en Lynx, (2) si el `fetch` de Lynx cumple lo que `m.request`
 > (spec: <https://mithril.js.org/request.html>) espera. Fuentes: doc
@@ -31,9 +39,11 @@ más corta:
 - `config(xhr) => xhr` (el escape hatch de la API real) — sigue sin
   traducción posible: `fetch` no expone un objeto vivo para mutar a mitad
   de vuelo. Esto no lo arregla el spike.
-- `FormData`/`URLSearchParams` como body — la doc de Lynx dice
-  explícitamente que no están soportados (no se re-probó en device, la
-  doc + los tipos coinciden en esto, suficiente certeza).
+- `FormData` como body — confirmado ausente en device (§4). **Corrección**:
+  `URLSearchParams` sí está soportado como body — se probó en device
+  específicamente porque la doc los agrupaba juntos y ya habíamos visto a
+  los tipos/doc equivocarse antes en este mismo documento (no había
+  motivo para confiar en la doc sin probar, dado el patrón).
 - `responseType: "blob"` — `Body` en Lynx solo tiene `arrayBuffer()`,
   `json()`, `text()`. Sin `.blob()`.
 - `withCredentials`, `user`/`password` (auth básica vía `xhr.open`),
@@ -121,7 +131,8 @@ doc — el código real):
 |---|---|---|
 | `method`, `url`, `params` | `xhr.open(method, url)` + interpolación de `:params` en la URL | **Sí** — `fetch(url, {method})`; interpolación reusa `mithril-runtime/pathname/build.js` (ya vendorizado para `m.route`, cero código nuevo) |
 | `body` (objeto plano → JSON) | `xhr.send(JSON.stringify(body))` | **Sí** — `body: JSON.stringify(body)` en `RequestInit`, mismo `Content-Type` header |
-| `body` (`FormData`/`URLSearchParams`) | `xhr.send(body)` directo | **No** — Lynx no soporta `FormData`. Body cae siempre al camino JSON o hay que rechazar explícitamente |
+| `body` (`FormData`) | `xhr.send(body)` directo | **No** — confirmado ausente en runtime (§4) |
+| `body` (`URLSearchParams`) | `xhr.send(body)` directo | **Sí** — confirmado en device (§4): funciona igual que en un browser real, `Content-Type: application/x-www-form-urlencoded` automático |
 | `headers` | `xhr.setRequestHeader(k, v)` por cada key | **Sí** — `RequestInit.headers` acepta un objeto plano (`HeadersInit`) |
 | `responseType` (`json`/`text`) | `xhr.responseType` + `xhr.response` | **Sí** — `response.json()` / `response.text()` |
 | `responseType: "blob"`/`"document"` | `xhr.responseType = "blob"` | **No** — sin `.blob()` en `Body`; `"document"` no tiene sentido fuera de un DOM de browser |
@@ -146,8 +157,10 @@ falta buscarlo:
 - `config` cambia de firma (`RequestInit`, no `XMLHttpRequest`) — código
   portado de un `m.request` real que use `config` para algo más que setear
   un header necesita revisión manual, no es un cambio de import.
-- Sin soporte de `FormData`/`URLSearchParams`/`Blob` — cualquier caso de
-  subida de archivos o multipart queda fuera de alcance por completo.
+- Sin soporte de `FormData`/`Blob` — cualquier caso de subida de archivos
+  o multipart queda fuera de alcance por completo. (`URLSearchParams` SÍ
+  está soportado — confirmado en device, §4 — así que un body tipo
+  formulario simple `key=value` no cae en esta lista.)
 - Sin `withCredentials` (no aplica, Lynx no tiene modelo de CORS/origen) y
   sin `user`/`password` inline — si hace falta auth básica, armar el
   header `Authorization` a mano (y una función de base64 propia, ya que
@@ -214,14 +227,29 @@ anterior de este documento (por estar `"fetch"` en la lista
 corrigió. Coincide con que `indicadores-app` (la app que el usuario
 señaló) ya usa `lynx.fetch(...)` explícito, no por casualidad.
 
-Segundo hallazgo extra: `new Headers({...})` pasado a
-`fetch(url, {headers})` **sí llega bien al servidor** (confirmado con
-`https://httpbin.org/headers`, que devuelve de vuelta los headers que
-recibió) — pero `headersInstance.get("x-test")` sobre esa misma instancia
-devolvió `null` en vez del valor puesto. Construir/enviar headers
-funciona; leer de una instancia de `Headers` con `.get()` no se puede dar
-por confiable sin una segunda vuelta de investigación (no bloqueante para
-`m.request`, que nunca necesita leer una `Headers` que armó él mismo).
+Segundo hallazgo extra, **re-confirmado con un test limpio y deliberado**
+(el primer intento coincidió con un corte de sesión — pantalla del device
+bloqueada — y no era confiable por sí solo, así que se repitió antes de
+darlo por bueno): `new Headers({...})` pasado a `fetch(url, {headers})`
+**sí llega bien al servidor** — pero **`Headers.get()`/`.has()` son
+case-*sensitive*** en Lynx: `h.set("X-Test", "abc"); h.get("x-test")` →
+`null`; `h.has("x-test")` → `false`. El spec real de `Headers` es
+explícitamente case-**in**sensitive (`Content-Type` y `content-type` son
+la misma clave) — esta es una desviación real y confirmada, no un
+artefacto de sesión. Construir/enviar headers funciona perfecto; leer de
+vuelta con la clave en otra capitalización que la usada para escribir,
+no.
+
+**Tercer hallazgo extra**: aunque `FormData` está confirmado ausente
+(`typeof FormData` → `"undefined"`), **`URLSearchParams` SÍ existe y
+funciona como body real** — `lynx.fetch(url, {method:"POST", body: new
+URLSearchParams({foo:"bar"})})` llegó al servidor como
+`application/x-www-form-urlencoded` con el `Content-Type` seteado
+automático y los campos bien parseados (`{foo:"bar"}`). Esto **mejora**
+la fila de la tabla §2 sobre `body` no-JSON: la mitad de esa opción real
+de `m.request` (`FormData`) sigue sin soporte, pero la otra mitad
+(`URLSearchParams`) **sí se puede replicar fiel**, sin necesitar
+`JSON.stringify` ni tocar el `Content-Type` a mano.
 
 ## 5. Si se decide implementar: forma concreta (fase futura, no esta sesión)
 

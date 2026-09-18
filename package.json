@@ -20,6 +20,10 @@
     "./route": {
       "types": "./src/route.d.ts",
       "default": "./src/route.js"
+    },
+    "./request": {
+      "types": "./src/request.d.ts",
+      "default": "./src/request.js"
     }
   },
   "scripts": {

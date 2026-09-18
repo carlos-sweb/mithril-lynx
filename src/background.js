@@ -18,6 +18,7 @@ import { createLynxDocument } from "./fake-dom.js";
 import { createVirtualBackend } from "./backends/virtual-backend.js";
 import { createCommitController } from "./commit.js";
 import { onEventFromMainThread, sendPatchToMainThread } from "./channel.js";
+import { register as registerRedraw } from "./mount-redraw.js";
 
 /**
  * @param {object} options
@@ -53,6 +54,7 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread }) {
 	}
 
 	performRender();
+	registerRedraw(performRender);
 
 	// Wires every forwarded native event straight to the fake-dom node it
 	// targets — `dispatchEvent` (fake-dom.js) then invokes Mithril's own
