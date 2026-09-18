@@ -1,3 +1,5 @@
+import type { Component } from "mithril";
+
 export interface RouteResolver {
 	onmatch?(args: Record<string, string>, requestedPath: string, route: string): unknown;
 	render?(vnode: unknown): unknown;
@@ -22,7 +24,7 @@ export interface Route {
 	forward(): void;
 	prefix: string;
 	SKIP: unknown;
-	Link: { view(vnode: { attrs: RouteLinkAttrs; children: unknown }): unknown };
+	Link: Component<RouteLinkAttrs>;
 }
 
 export function createRoute(): Route;

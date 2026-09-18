@@ -1,11 +1,16 @@
 # Plan — `m.route` para mithril-lynx-v2: navegación en memoria, sin APIs de navegador
 
-> Estado (2026-09-17): **F0–F3 hechos y verificados con `rstest` (PAPI
-> real, sin mocks). F4–F6 bloqueados**: F4/F5 necesitan el device
-> conectado (no lo está en este momento — `adb devices` vacío); además
-> `mithril-runtime@1.1.0` (con `pathname/`/`querystring/` vendorizados)
-> está pusheado a GitHub pero el `npm publish` pide un OTP que solo el
-> usuario puede aprobar — mientras tanto `mithril-lynx-v2` depende de
+> Estado (2026-09-17): **Plan completo — F0–F6 hechos y verificados.**
+> F1–F3 con `rstest` (PAPI real, sin mocks, 9/9 tests). F4 y F6 en device
+> real con una demo de 2 pantallas (`mithril-lynx-v2-app`), verificados
+> mirando los ops del patch real (no el `nodeId` de CDP — ver la nota
+> metodológica en §10, un hallazgo real de esta sesión). F5 (botón atrás
+> nativo) queda con la respuesta de F0 (no hay evento expuesto al JS) sin
+> una forma de confirmarlo/descartarlo más a fondo en este device.
+> Pendiente no bloqueante: `mithril-runtime@1.1.0` (con
+> `pathname/`/`querystring/` vendorizados) está pusheado a GitHub pero el
+> `npm publish` pide un OTP que solo el usuario puede aprobar — mientras
+> tanto `mithril-lynx-v2` y `mithril-lynx-v2-app` dependen de
 > `file:/home/sweb/mithril-runtime` en vez de `^1.1.0`. Ver §10 al final
 > para el detalle exacto.
 > Idioma: español (consistente con el resto de planes de este proyecto).
@@ -328,11 +333,65 @@ conectarlo a `route.back()` es trivial.
   cuanto el publish se complete (mismo procedimiento que la vez pasada
   con 1.0.0).
 
-### F4–F6 — pendientes, bloqueados por el device
+### F4 y F6 — cerrados, verificados en device real (2026-09-17, sesión siguiente)
 
-No se pudo verificar en device real esta sesión (`adb devices` no listó
-ningún device conectado). Falta: navegar entre 2+ pantallas reales y
-confirmar árbol limpio con `uiautomator`/DevTool (F4); confirmar o
-descartar en vivo el hallazgo estático de F0 sobre el botón atrás (F5);
-probar reload (A/B) combinado con una ruta activa (F6). Reconectar el
-device y correr esto es el siguiente paso concreto.
+Se armó una demo real de 2 pantallas en `mithril-lynx-v2-app`:
+`src/screens/home.ts` (título + input + `route.Link` a `/detail/:id`) y
+`src/screens/detail.ts` (título + `route.param("id")` + `route.Link` de
+vuelta a `/`), con `background.ts` reescrito para usar `route(...)` +
+un stable-host **por pantalla** (`HomeHost`/`DetailHost`, cada uno
+`{view: () => currentX.view()}`) y `module.hot.accept` por archivo de
+pantalla, llamando `route.set(route.get(), null, {replace:true})` para
+forzar el re-render tras un hot-swap — la generalización directa del
+patrón stable-host de F1/F3 del plan de reload, ahora una instancia por
+ruta en vez de una sola global.
+
+**F4 (navegación limpia)**: tap en "Ir a Detail →" en device real → título
+cambia a "Detail" en rojo, `id: 42` se ve correctamente interpolado
+(`buildPathname("/detail/:id", {id:42})` funcionando). Vuelta con
+"← Volver a Home" funciona. **Hallazgo metodológico importante**: la
+primera verificación usó `DOM.getDocument()` de Lynx DevTool para comparar
+`nodeId` antes/después, y el `nodeId` cambió por completo entre pantallas
+— parecía un huérfano. **Es una falsa alarma**: `nodeId` de CDP se
+reasigna en cada llamada a `DOM.getDocument()`, no es un handle estable
+del elemento nativo — comparar `nodeId` entre dos llamadas *distintas* no
+prueba nada sobre si el elemento físico se recreó. La verificación
+correcta (y la que de verdad importa) es mirar los **ops del patch real**:
+navegar Home→Detail generó `[Op.RemoveChild, 0, 1, Op.CreateElement,
+"view", 8, ...]` — un solo `RemoveChild` que tira toda la subrama vieja de
+Home (id interno 1, el propio backend/virtual id, no el `nodeId` de CDP)
+antes de crear Detail desde cero. Cero huérfanos, confirmado por el
+mecanismo correcto. **Corrección para F5 del plan de reload
+(`mithril-lynx-v2-desde-cero.md`)**: esa sesión también usó
+`DOM.getDocument()` antes/después y reportó ids estables — en ese caso
+coincidió con la realidad (validado independientemente por
+`uiautomator` en la misma sesión), pero fue suerte de que no cambiara de
+método entre llamadas, no una propiedad garantizada de la herramienta.
+Anotado acá para que futuras sesiones no repitan la comparación de
+`nodeId` entre llamadas separadas de `DOM.getDocument()` como prueba de
+identidad.
+
+**F6 (reload + ruta activa)**: parado en `/detail/42`, se editó
+`screens/detail.ts` en vivo (cambio de texto). Logcat:
+`:4`→`:5`→`:6 hmr-check-resolved updatedModulesLength:1`, **sin**
+`:9` (full reload). Captura directa de los ops reales enviados
+(instrumentación temporal en `channel.js`, removida después de
+confirmar): **`[Op.SetText, id, "texto nuevo"]` — nada más.** Cero
+`CreateElement`, cero `RemoveChild`. El stable-host por pantalla funciona
+exactamente igual que el stable-host global del plan de reload — routing
+no rompió nada del mecanismo ya construido. Confirmado además con un test
+de regresión permanente (`test/route-hot-reload.test.ts`) que fija este
+comportamiento con las mismas aserciones sobre los ops.
+
+**F5 (botón atrás nativo)**: no se encontró forma de disparar un back
+nativo real en esta sesión para confirmar/descartar el hallazgo estático
+de F0 (el device no tiene un botón físico de "atrás" mapeado a la app —
+solo el botón de navegación de Android, que sale de la app en vez de
+navegar dentro de ella). El hallazgo de F0 (no hay evento expuesto al JS)
+queda como la respuesta operativa: `route.back()`/`route.Link` explícito
+son el único camino, tal como React/Vue en Lynx tampoco ofrecen otra
+cosa.
+
+**Suite completa: 9/9 tests pasan** (`npx rstest run`, sin device) — F1-F3
+originales (5) + F6 (1, `route-hot-reload.test.ts`) + los 3 previos del
+plan de reload.
