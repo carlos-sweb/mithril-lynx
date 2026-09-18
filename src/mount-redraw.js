@@ -15,6 +15,13 @@
 // for the app's whole lifetime (plan §3.1), so "the current redraw
 // function" is a single slot, not a list.
 //
+// Also exported publicly (`mithril-lynx/mount-redraw`), not just used
+// internally by request.js — any reusable component (not just this
+// package's own code) that mutates state from an async callback outside a
+// real event handler (a timer, a promise, an animation frame) needs the
+// exact same "redraw whichever app is mounted" call this module already
+// provides; there is no reason to make library authors reinvent it.
+//
 // `redraw()` schedules instead of calling `currentRedraw()` inline — same
 // reason real Mithril's version schedules through the platform's
 // requestAnimationFrame instead of rendering synchronously: `request.js`'s
