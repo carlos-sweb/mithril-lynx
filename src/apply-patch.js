@@ -101,7 +101,15 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					const name = ops[i++];
 					const value = ops[i++];
 					const handle = handles.get(id);
+					// "class" and "id" each have their own dedicated PAPI call
+					// (__SetClasses/__SetID) — __SetAttribute itself rejects
+					// both ("Cannot use __SetAttribute for \"class\"/\"id\"").
+					// Found porting a component that assigns a native `id` for
+					// an imperative selector-query ref (see mithril-lynx-ui's
+					// docs/native-papi/papi-01-imperative-refs.md) — nothing
+					// in this rewrite's own test suite had set `id` before.
 					if (name === "class") __SetClasses(handle, value == null ? "" : value);
+					else if (name === "id") __SetID(handle, value == null ? null : value);
 					else __SetAttribute(handle, name, value);
 					break;
 				}
@@ -110,6 +118,7 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 					const name = ops[i++];
 					const handle = handles.get(id);
 					if (name === "class") __SetClasses(handle, "");
+					else if (name === "id") __SetID(handle, null);
 					else __SetAttribute(handle, name, null);
 					break;
 				}
