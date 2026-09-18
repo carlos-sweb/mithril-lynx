@@ -1,6 +1,9 @@
 export interface PatchApplier {
 	registerPageRoot(pageRootHandle: unknown): void;
 	applyPatch(ops: unknown[]): void;
+	/** The real PAPI element handle for a given background-side id, or
+	 * `undefined` if nothing was ever created for it. */
+	getHandle(id: unknown): unknown;
 }
 
 /** See apply-patch.js's own header for the exact op vocabulary this replays. */

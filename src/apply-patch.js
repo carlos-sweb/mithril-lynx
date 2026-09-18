@@ -175,5 +175,19 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 		__FlushElementTree();
 	}
 
-	return { registerPageRoot, applyPatch };
+	return {
+		registerPageRoot,
+		applyPatch,
+		/** The real PAPI element handle for a given background-side id, or
+		 * `undefined` if nothing was ever created for it. Exists for tests
+		 * (see mithril-lynx/testing) that need to correlate a fake-dom node's
+		 * `_id` with the real element the testing environment's PAPI
+		 * recording (mithril-lynx-v1's own installTestingPolyfills wraps
+		 * every `__`-prefixed call regardless of which package called it, so
+		 * this is how a v2 test finds "which of those calls targeted THIS
+		 * element") — never needed by application code. */
+		getHandle(id) {
+			return handles.get(id);
+		},
+	};
 }
