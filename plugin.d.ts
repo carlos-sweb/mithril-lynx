@@ -1,8 +1,8 @@
 import type { RsbuildPlugin } from "@lynx-js/rspeedy";
 
-export interface PluginMithrilLynxV2Options {
+export interface PluginMithrilLynxOptions {
 	targetSdkVersion?: string;
 	liveReload?: boolean;
 }
 
-export function pluginMithrilLynxV2(options?: PluginMithrilLynxV2Options): RsbuildPlugin;
+export function pluginMithrilLynx(options?: PluginMithrilLynxOptions): RsbuildPlugin;

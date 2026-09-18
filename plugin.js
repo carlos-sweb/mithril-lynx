@@ -105,7 +105,7 @@ function packageRootOf(resolvedFile, expectedName) {
 	return null;
 }
 
-export function pluginMithrilLynxV2(options = {}) {
+export function pluginMithrilLynx(options = {}) {
 	const targetSdkVersion = options.targetSdkVersion ?? "3.5";
 	const liveReload = options.liveReload ?? true;
 
