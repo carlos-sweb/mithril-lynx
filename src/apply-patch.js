@@ -6,11 +6,11 @@
 // low-level interpreter of the flat op array straight onto the real
 // Element PAPI, in the spirit of ReactLynx's own `snapshotPatchApply.js`
 // (see rspeedy-react-analysis/LYNX_PAPI_SPEC.md §4.3): a switch over op
-// codes, one real PAPI call per case, nothing else. One deliberate
-// exception: Op.CreateList's own cell content (see list-support.js) DOES
-// run a real Mithril render pass right here, on this thread — the only way
-// to satisfy native's synchronous componentAtIndex contract at all (see
-// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui).
+// codes, one real PAPI call per case, nothing else. Op.CreateList's own
+// cell content (list-support.js) is no exception to that: componentAtIndex
+// replays ops the background thread already computed (list-cell.js), the
+// same way this function replays the app's own top-level tree — see
+// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui.
 //
 // The exact `__Create*`/pageId contract below (one `pageId` shared by every
 // element on a page, `__CreateView`/`__CreateText`/generic `__CreateElement`
@@ -191,16 +191,41 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
  * @param {number} pageId - `__GetElementUniqueID(pageElement)` of the real
  *   page this applier is attached to. Every element this applier creates
  *   belongs to that one page — see CONTRACT.md / lynx-mithril-shim.js.
+ * @param {object} [options]
+ * @param {Function} [options.onEvent]
+ * @param {boolean} [options.flush] - Whether `applyPatch` calls the bare,
+ *   whole-page `__FlushElementTree()` after applying its ops. Defaults to
+ *   `true` — the right default for the ONE real top-level applier per page
+ *   (main-thread.js's own use). `false` for a per-cell applier
+ *   (list-support.js): a list cell's real commit point is the list-specific
+ *   `__FlushElementTree(wrapperHandle, {triggerLayout, operationID,
+ *   elementID, listID})` call list-support.js already makes right after —
+ *   calling the bare, whole-page flush too, from inside native's own
+ *   synchronous componentAtIndex callback, is a second, unrelated flush this
+ *   applier was never meant to trigger on that call site's behalf.
  */
-export function createPatchApplier(pageId, { onEvent } = {}) {
+export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// id (as allocated by the background's virtual backend) -> real PAPI
 	// element handle. id 0 is reserved for "the page itself" (see
 	// fake-dom.js's LynxDocument) — pre-seeded here so the very first
 	// InsertBefore/AppendChild targeting id 0 has somewhere real to land.
 	const handles = new Map();
+	// list id -> its setCells(cells) function (list-support.js) — kept here,
+	// not as a property on the list's own handle: a real native list handle
+	// does not reliably hold a custom property across calls (confirmed on
+	// device), only `handles` (a plain Map) does.
+	const listSetters = new Map();
+
+	/** General form: seed the mapping for any id, not just the page root —
+	 * list-support.js uses this to alias a list-cell.js `containerId` (an
+	 * off-tree id from the background thread's OWN document) to the real
+	 * native wrapper element it created for that cell. */
+	function registerRoot(id, handle) {
+		handles.set(id, handle);
+	}
 
 	function registerPageRoot(pageElementHandle) {
-		handles.set(0, pageElementHandle);
+		registerRoot(0, pageElementHandle);
 	}
 
 	function createElementHandle(tag) {
@@ -210,12 +235,15 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 	}
 
 	/**
-	 * Applies one commit's worth of ops, then flushes exactly once —
-	 * `__FlushElementTree` is the real commit; nothing before it is visible.
-	 * This function itself is the ONLY caller of `__FlushElementTree` on
-	 * this applier's page — never called conditionally, never looked up
-	 * through a global (mirrors the fix in commit.js on the background
-	 * side: one explicit call site, not an implicit one).
+	 * Applies one commit's worth of ops, then — unless this applier was
+	 * created with `flush: false` (see this function's own constructor
+	 * options above) — flushes exactly once with the bare, whole-page
+	 * `__FlushElementTree()`; that call is the real commit for the ONE
+	 * top-level applier per page, never looked up through a global. A
+	 * per-cell applier (list-support.js) passes `flush: false` and issues
+	 * its own list-specific `__FlushElementTree(wrapperHandle, {...})` call
+	 * afterward instead — that one, not this one, is that cell's real
+	 * commit point.
 	 */
 	function applyPatch(ops) {
 		for (let i = 0; i < ops.length; ) {
@@ -363,29 +391,30 @@ export function createPatchApplier(pageId, { onEvent } = {}) {
 				}
 				case Op.CreateList: {
 					const id = ops[i++];
-					const rendererKey = ops[i++];
 					const scrollOrientation = ops[i++];
 					const listType = ops[i++];
 					const spanCount = ops[i++];
-					handles.set(id, createNativeList(pageId, rendererKey, scrollOrientation, listType, spanCount, createPatchApplier, onEvent));
+					const { handle, setCells } = createNativeList(pageId, scrollOrientation, listType, spanCount, createPatchApplier, onEvent);
+					handles.set(id, handle);
+					listSetters.set(id, setCells);
 					break;
 				}
 				case Op.SetListItems: {
 					const id = ops[i++];
-					const itemsJSON = ops[i++];
-					const listHandle = handles.get(id);
-					listHandle.__setItems(JSON.parse(itemsJSON));
+					const cellsJSON = ops[i++];
+					listSetters.get(id)(JSON.parse(cellsJSON));
 					break;
 				}
 				default:
 					throw new Error(`[mithril-lynx] Unknown patch opcode: ${opcode}`);
 			}
 		}
-		__FlushElementTree();
+		if (flush) __FlushElementTree();
 	}
 
 	return {
 		registerPageRoot,
+		registerRoot,
 		applyPatch,
 		/** The real PAPI element handle for a given background-side id, or
 		 * `undefined` if nothing was ever created for it. Exists for tests

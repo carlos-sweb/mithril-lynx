@@ -1,19 +1,21 @@
 import { describe, expect, it } from "@rstest/core";
 import m from "mithril";
+import renderFactory from "mithril-runtime/render/render.js";
 import { createPatchApplier } from "../src/apply-patch.js";
-import { registerListRenderer } from "../src/list-support.js";
+import { createVirtualBackend } from "../src/backends/virtual-backend.js";
+import { createLynxDocument } from "../src/fake-dom.js";
+import { renderListCell } from "../src/list-cell.js";
 import { Op } from "../src/patch-protocol.js";
 
-// Op.CreateList end-to-end: registerListRenderer() (the main-thread.ts side
-// of the design — see docs/native-papi/papi-06-virtualized-lists.md in
-// mithril-lynx-ui) plus a raw CreateList/SetListItems op sequence applied
-// directly (mithril-lynx-ui's own List component is what normally produces
-// these ops from the background thread; this test drives apply-patch.js
-// directly, the same level end-to-end.test.ts already operates at).
-//
-// componentAtIndex/enqueueComponent are native's own synchronous contract —
-// driven directly here, exactly like mithril-lynx-ui's own list.test.ts
-// already does against mithril-lynx-v1's list.js.
+// Op.CreateList end-to-end. A cell's own content is computed on the
+// BACKGROUND thread (list-cell.js's renderListCell(), through the app's own
+// document/render — no separate render pipeline) and only replayed on the
+// main thread (list-support.js) — see
+// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui. This
+// test drives both halves directly: a background document renders each item
+// into cells, then a main-thread applier replays Op.CreateList/
+// Op.SetListItems with those cells, exactly like mithril-lynx-ui's own List
+// component does end to end.
 
 function requestCell(listHandle: any, index: number, opId = 1) {
 	const listId = __GetElementUniqueID(listHandle);
@@ -34,37 +36,37 @@ function textOf(node: any): string {
 	return out;
 }
 
-function setupList(rendererKey: string) {
+/** Stands in for mithril-lynx-ui's <List>: one persistent background
+ * document + render instance, reused across calls — see list-cell.js's own
+ * header for why callers keep one of these per list, not one per cell. */
+function makeCellSource(renderItem: (item: any, index: number) => unknown) {
+	const document = createLynxDocument(createVirtualBackend());
+	const render = renderFactory();
+	return {
+		document,
+		buildCells: (items: unknown[]) => items.map((item, index) => renderListCell(document, render, () => {}, renderItem, item, index)),
+	};
+}
+
+function setupList() {
 	lynxTestingEnv.switchToMainThread();
 	const pageId = __GetElementUniqueID(__CreatePage());
 	const applier = createPatchApplier(pageId);
 	applier.registerPageRoot(__CreateView(pageId));
-	applier.applyPatch([Op.CreateList, 1, rendererKey, "vertical", "single", 1]);
+	applier.applyPatch([Op.CreateList, 1, "vertical", "single", 1]);
 	const listHandle = applier.getHandle(1) as any;
 	return { applier, listHandle };
 }
 
-function setItems(applier: ReturnType<typeof createPatchApplier>, items: unknown[]) {
-	applier.applyPatch([Op.SetListItems, 1, JSON.stringify(items)]);
+function setCells(applier: ReturnType<typeof createPatchApplier>, cells: unknown[]) {
+	applier.applyPatch([Op.SetListItems, 1, JSON.stringify(cells)]);
 }
 
 describe("Op.CreateList (native virtualized list support)", () => {
-	it("throws a clear error for an unregistered renderer key", () => {
-		lynxTestingEnv.switchToMainThread();
-		const pageId = __GetElementUniqueID(__CreatePage());
-		const applier = createPatchApplier(pageId);
-		applier.registerPageRoot(__CreateView(pageId));
-
-		expect(() => applier.applyPatch([Op.CreateList, 1, "nonexistent-key", "vertical", "single", 1])).toThrow(
-			/no list renderer registered for "nonexistent-key"/,
-		);
-	});
-
-	it("renders real content per cell via the registered renderer, driven by componentAtIndex", () => {
-		registerListRenderer("basic", (item: string, index: number) => m("text", {}, `${index}:${item}`));
-
-		const { applier, listHandle } = setupList("basic");
-		setItems(applier, ["a", "b", "c"]);
+	it("renders real content per cell from ops the background thread already computed", () => {
+		const { buildCells } = makeCellSource((item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { applier, listHandle } = setupList();
+		setCells(applier, buildCells(["a", "b", "c"]));
 
 		requestCell(listHandle, 0);
 		requestCell(listHandle, 1);
@@ -73,10 +75,9 @@ describe("Op.CreateList (native virtualized list support)", () => {
 	});
 
 	it("recycles a cell for a different index, and its content updates to match", () => {
-		registerListRenderer("recycle-basic", (item: string, index: number) => m("text", {}, `${index}:${item}`));
-
-		const { applier, listHandle } = setupList("recycle-basic");
-		setItems(applier, ["a", "b", "c", "d"]);
+		const { buildCells } = makeCellSource((item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { applier, listHandle } = setupList();
+		setCells(applier, buildCells(["a", "b", "c", "d"]));
 
 		const signA = requestCell(listHandle, 0);
 		const wrapperA = listHandle.children[0];
@@ -91,15 +92,42 @@ describe("Op.CreateList (native virtualized list support)", () => {
 	});
 
 	it("SetListItems with a larger array requests the newly available indices without error", () => {
-		registerListRenderer("grow", (item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { buildCells } = makeCellSource((item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { applier, listHandle } = setupList();
 
-		const { applier, listHandle } = setupList("grow");
-
-		setItems(applier, ["a", "b"]);
+		setCells(applier, buildCells(["a", "b"]));
 		expect(() => requestCell(listHandle, 1)).not.toThrow();
 		expect(() => requestCell(listHandle, 2)).toThrow(/cellIndex 2 out of range/);
 
-		setItems(applier, ["a", "b", "c"]);
+		setCells(applier, buildCells(["a", "b", "c"]));
 		expect(() => requestCell(listHandle, 2)).not.toThrow();
+	});
+
+	it("SetListItems re-flushes an already-attached cell's content in place", () => {
+		const { buildCells } = makeCellSource((item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { applier, listHandle } = setupList();
+		setCells(applier, buildCells(["a", "b"]));
+
+		requestCell(listHandle, 0);
+		const wrapper = listHandle.children[0];
+		expect(textOf(wrapper)).toBe("0:a");
+
+		setCells(applier, buildCells(["z", "b"])); // same count, index 0's content changed
+		expect(textOf(wrapper)).toBe("0:z");
+	});
+
+	it("a tap inside a cell dispatches through the background thread's own fake-dom node", () => {
+		const { document, buildCells } = makeCellSource(() =>
+			m("text", { ontap: () => { taps += 1; } }, "tap me"),
+		);
+		let taps = 0;
+		const { applier, listHandle } = setupList();
+		const cells = buildCells([{}]);
+		setCells(applier, cells);
+		requestCell(listHandle, 0);
+
+		const node = document.getNodeById((cells[0] as any).rootChildIds[0]);
+		node!.dispatchEvent({ type: "tap", currentTarget: node, preventDefault() {}, stopPropagation() {} });
+		expect(taps).toBe(1);
 	});
 });

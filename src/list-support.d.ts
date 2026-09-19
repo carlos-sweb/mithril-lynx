@@ -1,10 +1,13 @@
-// Ambient declaration for the ESM src/list-support.js.
-//
-// Import this from your app's main-thread.ts (alongside setupRenderer()
-// from "mithril-lynx/main-thread") and call registerListRenderer() once
-// per list your app uses — see that file's own header, and
-// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui, for
-// why the render function itself has to be registered here rather than
-// passed in from background.ts directly.
+// Ambient declaration for the ESM src/list-support.js — the main-thread
+// half of native list support. Not meant to be imported directly by app
+// code; apply-patch.js's own Op.CreateList case is the only caller. See
+// list-cell.d.ts for the background-thread half an app actually uses.
 
-export function registerListRenderer(key: string, renderItem: (item: unknown, index: number) => unknown): void;
+export function createNativeList(
+	pageId: number,
+	scrollOrientation: string,
+	listType: string,
+	spanCount: number,
+	createPatchApplier: (pageId: number, options?: { onEvent?: Function; flush?: boolean }) => object,
+	onEvent?: Function,
+): { handle: unknown; setCells: (cells: unknown[]) => void };

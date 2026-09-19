@@ -1,6 +1,6 @@
 {
   "name": "mithril-lynx",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Mithril.js on Lynx: real mithril/render/render.js driven through a Lynx-backed fake DOM, with an explicit single commit hook (no conditional global flush) and three reload modes (data-light, structural-light, full). A complete rewrite of the previous mithril-lynx (0.0.x).",
   "license": "MIT",
   "type": "module",
@@ -36,6 +36,10 @@
     "./list-support": {
       "types": "./src/list-support.d.ts",
       "default": "./src/list-support.js"
+    },
+    "./list-cell": {
+      "types": "./src/list-cell.d.ts",
+      "default": "./src/list-cell.js"
     }
   },
   "scripts": {

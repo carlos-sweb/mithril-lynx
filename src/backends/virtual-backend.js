@@ -75,13 +75,13 @@ export function createVirtualBackend() {
 		removeGestureDetector(id, gestureId) {
 			pushOp(ops, Op.RemoveGestureDetector, id, gestureId);
 		},
-		createList(rendererKey, scrollOrientation, listType, spanCount) {
+		createList(scrollOrientation, listType, spanCount) {
 			const id = nextId++;
-			pushOp(ops, Op.CreateList, id, rendererKey, scrollOrientation, listType, spanCount);
+			pushOp(ops, Op.CreateList, id, scrollOrientation, listType, spanCount);
 			return id;
 		},
-		setListItems(id, items) {
-			pushOp(ops, Op.SetListItems, id, JSON.stringify(items));
+		setListItems(id, cells) {
+			pushOp(ops, Op.SetListItems, id, JSON.stringify(cells));
 		},
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {
@@ -89,6 +89,20 @@ export function createVirtualBackend() {
 			const out = ops;
 			ops = [];
 			return out;
+		},
+		/**
+		 * Runs `fn` (a DOM mutation against a node from THIS backend's own
+		 * document — same id space as everything else, so event dispatch
+		 * keeps working normally) and returns just the ops it produced,
+		 * removing them from the shared buffer so they never also go out
+		 * with the next `takeOps()`. Used by list-cell.js to render one list
+		 * item off-tree and ship its construction ops separately, instead of
+		 * as part of the app's own visible-tree patch.
+		 */
+		captureOps(fn) {
+			const start = ops.length;
+			fn();
+			return ops.splice(start, ops.length - start);
 		},
 	};
 }

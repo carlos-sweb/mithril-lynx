@@ -178,7 +178,7 @@ export class LynxElement extends LynxContainerNode {
 		this.tag = tag;
 		this.namespaceURI = ns;
 		this._id = listConfig
-			? backend.createList(listConfig.rendererKey, listConfig.scrollOrientation, listConfig.listType, listConfig.spanCount)
+			? backend.createList(listConfig.scrollOrientation, listConfig.listType, listConfig.spanCount)
 			: ns
 				? backend.createElementNS(ns, tag)
 				: backend.createElement(tag);
@@ -440,21 +440,24 @@ export class LynxDocument extends LynxContainerNode {
 
 	/**
 	 * A native virtualized list — see patch-protocol.js's Op.CreateList.
-	 * `rendererKey` must match a key registered on the MAIN thread via
-	 * mithril-lynx/list-support's registerListRenderer() (see
-	 * docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui):
-	 * the renderer function itself can't cross the thread boundary, only
-	 * this string key can. Call `.setListItems(items)` on the result to
-	 * populate it — items must be JSON-serializable, since they DO cross
-	 * the boundary, as data.
+	 * Populate it via `.setListItems(cells)` (list-cell.js builds `cells`
+	 * from an app's own `items`/`renderItem`) — see
+	 * docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui.
 	 */
-	createNativeList(rendererKey, options = {}) {
+	createNativeList(options = {}) {
 		return new LynxElement(this, this._backend, "list", undefined, {
-			rendererKey,
 			scrollOrientation: options.scrollOrientation ?? "vertical",
 			listType: options.listType ?? "single",
 			spanCount: options.spanCount ?? 1,
 		});
+	}
+
+	/** Delegates to the backend — see virtual-backend.js's own captureOps
+	 * for what this is for. Kept behind LynxDocument's public surface like
+	 * every other backend interaction in this file, rather than exposing
+	 * `_backend` itself to callers (list-cell.js). */
+	captureOps(fn) {
+		return this._backend.captureOps(fn);
 	}
 }
 
