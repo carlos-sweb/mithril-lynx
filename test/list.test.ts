@@ -116,6 +116,24 @@ describe("Op.CreateList (native virtualized list support)", () => {
 		expect(textOf(wrapper)).toBe("0:z");
 	});
 
+	it("a recycled cell is repositioned in the real tree to match its new index, not left where it was created", () => {
+		const { buildCells } = makeCellSource((item: string, index: number) => m("text", {}, `${index}:${item}`));
+		const { applier, listHandle } = setupList();
+		setCells(applier, buildCells(["a", "b", "c", "d"]));
+
+		requestCell(listHandle, 0);
+		const signB = requestCell(listHandle, 1);
+		requestCell(listHandle, 2);
+		// Real tree order matches request order so far: a, b, c.
+		expect([listHandle.children[0], listHandle.children[1], listHandle.children[2]].map(textOf)).toEqual(["0:a", "1:b", "2:c"]);
+
+		releaseCell(listHandle, signB); // b's wrapper goes to the recycle pool, still sitting in the middle of the tree
+		requestCell(listHandle, 3); // recycled for "d" — index 3 is after every other attached cell, so it belongs at the END
+
+		const children = [listHandle.children[0], listHandle.children[1], listHandle.children[2]];
+		expect(children.map(textOf)).toEqual(["0:a", "2:c", "3:d"]); // not ["0:a", "3:d", "2:c"] — the bug this test guards against
+	});
+
 	it("a tap inside a cell dispatches through the background thread's own fake-dom node", () => {
 		const { document, buildCells } = makeCellSource(() =>
 			m("text", { ontap: () => { taps += 1; } }, "tap me"),

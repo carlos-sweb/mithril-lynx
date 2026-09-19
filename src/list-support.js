@@ -46,10 +46,35 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		}
 	}
 
+	/** The wrapper of the lowest currently-attached cellIndex greater than
+	 * `cellIndex`, or null if none — the DOM position a cell at `cellIndex`
+	 * needs to be inserted before to land in the right place. Native lays
+	 * cells out in document-tree order, not by `item-key`, so a recycled
+	 * wrapper that keeps its OLD tree position (this file's own first
+	 * version never repositioned it at all) shows up out of order the
+	 * moment it's reused for a different index — confirmed on real
+	 * hardware via a scrambled child order after scrolling (item-keys
+	 * 7,8,9,3,4,5,6). Same problem `@lynx-js/react`'s own
+	 * `attachListItemAtIndex`/`findNextAttachedItem` solves for its
+	 * Element Template list. */
+	function findNextAttachedWrapper(cellIndex) {
+		let best = null;
+		for (const entry of signMap.values()) {
+			if (entry.cellIndex > cellIndex && (best == null || entry.cellIndex < best.cellIndex)) best = entry;
+		}
+		return best ? best.wrapperHandle : null;
+	}
+
+	function attachWrapper(listHandle, wrapperHandle, cellIndex) {
+		const refHandle = findNextAttachedWrapper(cellIndex);
+		if (refHandle != null) __InsertElementBefore(listHandle, wrapperHandle, refHandle);
+		else __AppendElement(listHandle, wrapperHandle);
+	}
+
 	function bindFreshItem(listHandle, listId, cellIndex, opId, cell, flush) {
 		const wrapperHandle = __CreateElement("list-item", pageId, {});
 		__SetAttribute(wrapperHandle, "item-key", String(cellIndex));
-		__AppendElement(listHandle, wrapperHandle);
+		attachWrapper(listHandle, wrapperHandle, cellIndex);
 
 		const applier = replayCell(wrapperHandle, cell);
 		const sign = __GetElementUniqueID(wrapperHandle);
@@ -58,11 +83,12 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return sign;
 	}
 
-	function bindRecycledItem(listId, cellIndex, opId, cell, pool, flush) {
+	function bindRecycledItem(listHandle, listId, cellIndex, opId, cell, pool, flush) {
 		const [sign, entry] = pool.entries().next().value;
 		pool.delete(sign);
 		clearWrapperChildren(entry);
 		__SetAttribute(entry.wrapperHandle, "item-key", String(cellIndex));
+		attachWrapper(listHandle, entry.wrapperHandle, cellIndex);
 		const applier = replayCell(entry.wrapperHandle, cell);
 		entry.applier = applier;
 		entry.rootChildIds = cell.rootChildIds;
@@ -78,7 +104,7 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		}
 		const cell = cells[cellIndex];
 		const pool = recycleMap.get(cell.typeKey);
-		if (pool && pool.size > 0) return bindRecycledItem(listId, cellIndex, opId, cell, pool, flush);
+		if (pool && pool.size > 0) return bindRecycledItem(listHandle, listId, cellIndex, opId, cell, pool, flush);
 		return bindFreshItem(listHandle, listId, cellIndex, opId, cell, flush);
 	}
 
