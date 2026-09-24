@@ -10,6 +10,8 @@ export interface RequestOptions<T = any> {
 	serialize?: (data: unknown) => string;
 	deserialize?: (data: unknown) => unknown;
 	extract?: (response: unknown, options: RequestOptions<T>) => unknown;
+	/** A constructor applied to the response: per element when the response
+	 * is an array (matching real `m.request`), otherwise to the whole result. */
 	type?: new (data: any) => T;
 	background?: boolean;
 	// Present on the real m.request signature but confirmed unsupported —

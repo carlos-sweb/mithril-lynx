@@ -15,7 +15,8 @@ describe("route.js + stable-host: a same-path re-resolve patches in place, never
 		lynxTestingEnv.switchToMainThread();
 		const capturedOps: unknown[][] = [];
 		lynx.getJSContext().addEventListener("MithrilLynx:Patch", (event: any) => {
-			capturedOps.push(event.data);
+			// event.data is [PROTOCOL_VERSION, ...ops] — drop the version prefix.
+			capturedOps.push(event.data.slice(1));
 		});
 
 		lynxTestingEnv.switchToBackgroundThread();

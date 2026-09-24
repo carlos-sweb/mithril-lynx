@@ -81,7 +81,7 @@ export function createVirtualBackend() {
 			return id;
 		},
 		setListItems(id, cells) {
-			pushOp(ops, Op.SetListItems, id, JSON.stringify(cells));
+			pushOp(ops, Op.SetListItems, id, cells);
 		},
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {

@@ -22,9 +22,12 @@ function setupRealTree() {
 	// tree inspected.
 	lynxTestingEnv.switchToMainThread();
 	lynx.getJSContext().addEventListener("MithrilLynx:Patch", (event: any) => {
-		capturedOps.push(event.data);
+		// event.data is [PROTOCOL_VERSION, ...ops] — mirror main-thread.js's
+		// own onPatch by stripping the version prefix before applying.
+		const ops = event.data.slice(1);
+		capturedOps.push(ops);
 		lynxTestingEnv.switchToMainThread();
-		applier.applyPatch(event.data);
+		applier.applyPatch(ops);
 	});
 
 	return { applier, capturedOps };

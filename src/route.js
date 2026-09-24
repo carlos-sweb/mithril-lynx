@@ -116,15 +116,32 @@ export function createRoute() {
 		if (!compiled.some((entry) => entry.check(defaultData))) {
 			throw new ReferenceError("Default route doesn't match any known routes.");
 		}
-		history = [defaultRoute];
-		historyIndex = 0;
-		ready = true;
-		resolveRoute(defaultRoute, null);
+		if (!ready) {
+			history = [defaultRoute];
+			historyIndex = 0;
+			ready = true;
+			resolveRoute(defaultRoute, null);
+		} else {
+			// Re-registration (e.g. HMR of the route module): keep the history
+			// stack and re-resolve the CURRENT path against the new table —
+			// the same thing the documented HMR pattern does by hand with
+			// route.set(route.get(), null, {replace: true}). Resolving
+			// defaultRoute here instead would silently jump the screen back to
+			// the initial route and discard the user's back/forward stack.
+			resolveRoute(currentPath != null ? currentPath : defaultRoute, null);
+		}
 	}
 
 	route.SKIP = {};
 
 	route.set = function (path, data, options) {
+		if (!ready) {
+			throw new Error(
+				"[mithril-lynx] route.set() called before route(defaultRoute, routes) — " +
+					"the route table does not exist yet, so this navigation would be " +
+					"silently dropped. Call route() first.",
+			);
+		}
 		if (lastUpdate != null) {
 			options = options || {};
 			options.replace = true;
@@ -161,14 +178,16 @@ export function createRoute() {
 	 * is F4/F5 of the plan, not done yet.
 	 */
 	route.back = function () {
-		if (historyIndex <= 0) return;
+		if (historyIndex <= 0) return false;
 		historyIndex--;
 		resolveRoute(history[historyIndex], null);
+		return true;
 	};
 	route.forward = function () {
-		if (historyIndex >= history.length - 1) return;
+		if (historyIndex >= history.length - 1) return false;
 		historyIndex++;
 		resolveRoute(history[historyIndex], null);
+		return true;
 	};
 
 	// Lynx has no `<a>`/`onclick` — this renders a tap-driven element

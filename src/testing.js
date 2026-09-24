@@ -24,25 +24,38 @@ export { createPatchApplier } from "./apply-patch.js";
 /**
  * Installs the polyfill on the main-thread globals object
  * @lynx-js/testing-environment hands to onInjectMainThreadGlobals. Scoped
- * to exactly what apply-patch.js calls (no gesture/list support — those
- * don't exist in mithril-lynx yet, see the main README's known gaps):
- * @lynx-js/testing-environment already implements __CreateView/__CreateText/
- * __CreateElement/__CreateRawText/__AppendElement/__InsertElementBefore/
- * __RemoveElement/__SetAttribute/__SetClasses/__AddInlineStyle/
- * __FlushElementTree/__GetElementUniqueID — the one real gap is
- * __AddEventListener (the testing environment only implements the
- * string/worklet-event __AddEvent family that ReactLynx uses; mithril-lynx
- * binds real JS function listeners directly).
+ * to the one real gap: @lynx-js/testing-environment already implements
+ * __CreateView/__CreateText/__CreateElement/__CreateRawText/__AppendElement/
+ * __InsertElementBefore/__RemoveElement/__SetAttribute/__SetClasses/
+ * __AddInlineStyle/__FlushElementTree/__GetElementUniqueID — the missing
+ * piece is __AddEventListener/__RemoveEventListener (the testing environment
+ * only implements the string/worklet-event __AddEvent family that ReactLynx
+ * uses; mithril-lynx binds real JS function listeners directly). Gesture and
+ * list ops (Op.SetGestureDetector/Op.CreateList) are covered by the testing
+ * environment itself, not by this polyfill — see test/gesture.test.ts and
+ * test/list.test.ts.
  */
 export function installTestingPolyfills(target) {
 	target.lynx.getEngine = target.lynx.getNative;
 
-	target.__AddEventListener = (node, name, handler) => {
+	// Faithful stand-ins for the native `__AddEventListener` /
+	// `__RemoveEventListener` PAPIs (element, name, callback, options). The
+	// options object is accepted and ignored here — the real native side
+	// requires it (FiberRemoveEventListener throws "param size should >= 4"
+	// without it), so __RemoveEventListener mirrors that arity requirement to
+	// keep the test environment honest about the wire contract.
+	target.__AddEventListener = (node, name, handler, _options) => {
 		node.__vanillaListeners ??= {};
 		(node.__vanillaListeners[name] ??= new Set()).add(handler);
 	};
 
-	target.__RemoveEventListener = (node, name, handler) => {
+	target.__RemoveEventListener = function (node, name, handler, _options) {
+		if (arguments.length < 4) {
+			throw new Error(
+				"[mithril-lynx/testing] __RemoveEventListener requires 4 params " +
+					"(element, name, callback, options) — matching FiberRemoveEventListener.",
+			);
+		}
 		node.__vanillaListeners?.[name]?.delete(handler);
 	};
 }

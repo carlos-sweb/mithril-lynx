@@ -20,9 +20,17 @@ export const eventFromMainThreadEventName = "MithrilLynx:Event";
 export const renderPageEventName = "__RenderPage";
 export const destroyLifetimeEventName = "__DestroyLifetime";
 
-/** Background thread: ship one commit's ops to the main thread. */
+import { PROTOCOL_VERSION } from "./patch-protocol.js";
+
+/**
+ * Background thread: ship one commit's ops to the main thread.
+ *
+ * The patch is prefixed with `PROTOCOL_VERSION` so the main thread can
+ * detect a stale/desynced bundle (partial HMR, cache) and fail loudly
+ * instead of re-interpreting reordered opcodes against the shared id space.
+ */
 export function sendPatchToMainThread(ops) {
-	lynx.getCoreContext().dispatchEvent({ type: patchEventName, data: ops });
+	lynx.getCoreContext().dispatchEvent({ type: patchEventName, data: [PROTOCOL_VERSION, ...ops] });
 }
 
 /** Background thread: receive a forwarded native event `{ id, type, payload }`. */

@@ -216,6 +216,12 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// device), only `handles` (a plain Map) does.
 	const listSetters = new Map();
 
+	// id -> Map<event type, listener callback>. `__AddEventListener` needs the
+	// exact callback reference back when `__RemoveEventListener` runs, so the
+	// listener cannot be an inline closure re-created per Op.AddEvent — it is
+	// stored here and reused by the Op.RemoveEvent case.
+	const eventListeners = new Map();
+
 	/** General form: seed the mapping for any id, not just the page root —
 	 * list-support.js uses this to alias a list-cell.js `containerId` (an
 	 * off-tree id from the background thread's OWN document) to the real
@@ -359,18 +365,43 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const id = ops[i++];
 					const type = ops[i++];
 					const handle = handles.get(id);
-					__AddEventListener(handle, type, (nativeEvent) => {
+					const listener = (nativeEvent) => {
 						onEvent?.(id, type, nativeEvent);
-					}, {});
+					};
+					let byType = eventListeners.get(id);
+					if (byType == null) eventListeners.set(id, (byType = new Map()));
+					byType.set(type, listener);
+					__AddEventListener(handle, type, listener, {});
 					break;
 				}
 				case Op.RemoveEvent: {
-					// PAPI has no documented `__RemoveEventListener` in the
-					// validated v1 surface (CONTRACT.md never needed it,
-					// since mithril-lynx v1 never tore down individual
-					// listeners outside of removing the whole element).
-					// Left as an explicit no-op + TODO rather than a guess.
-					i += 2;
+					const id = ops[i++];
+					const type = ops[i++];
+					const handle = handles.get(id);
+					const byType = eventListeners.get(id);
+					const listener = byType ? byType.get(type) : undefined;
+					if (typeof __RemoveEventListener === "function") {
+						// Native Fiber requires the options argument (>= 4 params) and
+						// derives the binding slot from it — pass the same `{}` the
+						// Op.AddEvent case uses so add/remove target the same slot.
+						if (listener != null) __RemoveEventListener(handle, type, listener, {});
+					} else if (listener != null) {
+						// Failing loudly is deliberate: without __RemoveEventListener a
+						// remove→re-add cycle on a kept element would accumulate
+						// duplicate native listeners and fire the handler N times per
+						// event. A silent no-op here is exactly the class of bug the
+						// whole project refuses to ship.
+						throw new Error(
+							"[mithril-lynx] __RemoveEventListener is not available on this runtime, " +
+								"so Op.RemoveEvent cannot be applied — a conditional event handler " +
+								"would leak duplicate listeners. Keep the handler constant or " +
+								"remove the whole element instead.",
+						);
+					}
+					if (byType != null) {
+						byType.delete(type);
+						if (byType.size === 0) eventListeners.delete(id);
+					}
 					break;
 				}
 				case Op.SetGestureDetector: {
@@ -401,8 +432,8 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 				}
 				case Op.SetListItems: {
 					const id = ops[i++];
-					const cellsJSON = ops[i++];
-					listSetters.get(id)(JSON.parse(cellsJSON));
+					const cells = ops[i++];
+					listSetters.get(id)(cells);
 					break;
 				}
 				default:

@@ -10,6 +10,7 @@
 // was never part of the bug this rewrite exists to fix.
 
 import { createPatchApplier } from "./apply-patch.js";
+import { PROTOCOL_VERSION } from "./patch-protocol.js";
 import {
 	destroyLifetimeEventName,
 	onPatchFromBackground,
@@ -39,11 +40,23 @@ export function setupRenderer() {
 	let pendingPatches = [];
 
 	const onPatch = (event) => {
+		const data = event.data;
+		if (!Array.isArray(data) || data[0] !== PROTOCOL_VERSION) {
+			throw new Error(
+				`[mithril-lynx] patch protocol mismatch: expected version ${PROTOCOL_VERSION}, ` +
+					`got ${Array.isArray(data) ? String(data[0]) : typeof data}. ` +
+					"This is always a stale/desynced bundle (partial HMR or a cached main-thread chunk) — " +
+					"rebuild both bundles together.",
+			);
+		}
+		// Strip the version prefix so applyPatch() still receives the bare
+		// flat op array the rest of the protocol documents.
+		const ops = data.slice(1);
 		if (!pageReady) {
-			pendingPatches.push(event.data);
+			pendingPatches.push(ops);
 			return;
 		}
-		applier.applyPatch(event.data);
+		applier.applyPatch(ops);
 	};
 	onPatchFromBackground(onPatch);
 

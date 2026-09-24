@@ -59,7 +59,7 @@ function setupList() {
 }
 
 function setCells(applier: ReturnType<typeof createPatchApplier>, cells: unknown[]) {
-	applier.applyPatch([Op.SetListItems, 1, JSON.stringify(cells)]);
+	applier.applyPatch([Op.SetListItems, 1, cells]);
 }
 
 describe("Op.CreateList (native virtualized list support)", () => {

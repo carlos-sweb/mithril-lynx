@@ -13,6 +13,20 @@
 // main-thread side by `applyPatch()` (see backends/papi-backend.js), so
 // nodes never need to be looked up by anything other than that integer.
 
+/**
+ * The wire protocol version, prepended to every patch by
+ * `sendPatchToMainThread()` and validated (then stripped) by the main
+ * thread before any op is interpreted. The two bundles are normally built
+ * from the same source, but a partial HMR or a cached main-thread bundle
+ * could otherwise re-interpret a reordered opcode silently — a version
+ * mismatch throws instead of corrupting the mirrored id space.
+ *
+ * The value is deliberately outside the 0..17 opcode range (0x4d4c = "ML"
+ * in ASCII) so a versioned array can never be misread as an op sequence if
+ * it is ever fed to `applyPatch()` without the strip.
+ */
+export const PROTOCOL_VERSION = 0x4d4c;
+
 export const Op = Object.freeze({
 	CreateElement: 0,
 	CreateElementNS: 1,
@@ -49,7 +63,7 @@ export const Op = Object.freeze({
 	// never runs renderItem() itself, only replays the ops that rendering
 	// already produced (apply-patch.js's Op.CreateList case + list-support.js).
 	CreateList: 16, // id, scrollOrientation, listType, spanCount
-	SetListItems: 17, // id, cellsJSON — cellsJSON = JSON.stringify(cells), cells: Array<{ typeKey, containerId, ops, rootChildIds }>, one entry per current item, computed by list-cell.js's renderListCell(). `ops` is a flat op array in this SAME encoding, scoped to `containerId` as its root parent id.
+	SetListItems: 17, // id, cells — cells: Array<{ typeKey, containerId, ops, rootChildIds }>, one entry per current item, computed by list-cell.js's renderListCell(). `ops` is a flat op array in this SAME encoding, scoped to `containerId` as its root parent id.
 });
 
 /**
@@ -85,7 +99,7 @@ export const OP_ARITY = Object.freeze({
 	[Op.SetGestureDetector]: 4, // id, gestureId, gestureType, arenaPolicy
 	[Op.RemoveGestureDetector]: 2, // id, gestureId
 	[Op.CreateList]: 4, // id, scrollOrientation, listType, spanCount
-	[Op.SetListItems]: 2, // id, cellsJSON
+	[Op.SetListItems]: 2, // id, cells
 });
 
 /** Walks a flat ops array, calling `visit(opcode, args)` once per op — args

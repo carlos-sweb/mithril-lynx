@@ -48,14 +48,66 @@ const REDRAW_DELAY_MS = 50;
 
 let currentRedraw = null;
 let pending = false;
+/** Handle of the currently-scheduled redraw timer, so `unregister()` can
+ * cancel it instead of leaving a stray callback that fires into a later
+ * mount. */
+let pendingTimer = null;
+/** Overridable via {@link configure}; defaults to REDRAW_DELAY_MS. */
+let redrawDelayMs = REDRAW_DELAY_MS;
+
+/**
+ * Overrides the debounce delay `redraw()` uses. Defaults to `REDRAW_DELAY_MS`
+ * (50ms) — the empirically-chosen margin documented at the top of this file,
+ * which is a safety margin rather than a scheduling guarantee. A device whose
+ * timer behaves differently (see FETCH_INVESTIGATION.md §4.6) can raise or
+ * lower it here.
+ */
+export function configure(options) {
+	if (options && options.redrawDelayMs != null) {
+		redrawDelayMs = options.redrawDelayMs;
+	}
+}
 
 function schedule(fn) {
 	const timer = typeof lynx !== "undefined" && typeof lynx.setTimeout === "function" ? lynx.setTimeout.bind(lynx) : setTimeout;
-	timer(fn, REDRAW_DELAY_MS);
+	return timer(fn, redrawDelayMs);
 }
 
+/**
+ * Registers the current app's redraw. Fail-fast: throws if a redraw is
+ * already registered, because a second live `renderApp()` in the same
+ * background context would silently overwrite the slot and let two
+ * documents corrupt the shared id space (see R2 in
+ * informe-contrato-mithril-lynx.md). Call {@link unregister} on teardown
+ * or full reload before registering a new one.
+ */
 export function register(redraw) {
+	if (currentRedraw != null) {
+		throw new Error(
+			"[mithril-lynx] redraw already registered — a shim instance is single-use: " +
+				"one renderApp() per background context, one redraw slot, for the " +
+				"lifetime of that context. Call unregister() (or do a full reload) " +
+				"before mounting a new app.",
+		);
+	}
 	currentRedraw = redraw;
+}
+
+/**
+ * Clears the current redraw registration (and the pending debounce flag) —
+ * used by a full reload and by the test suite between mounts. After this,
+ * `redraw()` is a no-op again until the next `register()`.
+ */
+export function unregister() {
+	currentRedraw = null;
+	pending = false;
+	if (pendingTimer != null) {
+		const clear = typeof lynx !== "undefined" && typeof lynx.clearTimeout === "function"
+			? lynx.clearTimeout.bind(lynx)
+			: clearTimeout;
+		clear(pendingTimer);
+		pendingTimer = null;
+	}
 }
 
 /** What `request.js` calls after a non-background request resolves. A
@@ -67,7 +119,8 @@ export function register(redraw) {
 export function redraw() {
 	if (pending) return;
 	pending = true;
-	schedule(() => {
+	pendingTimer = schedule(() => {
+		pendingTimer = null;
 		pending = false;
 		if (currentRedraw != null) currentRedraw();
 	});

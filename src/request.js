@@ -112,9 +112,13 @@ export function createRequestor(fetchImpl) {
 		// controller so a caller-provided signal and our timeout can both
 		// trigger the same abort.
 		const ctrl = new AbortController();
+		// Stored so the listener can be detached on settle (see detachSignal
+		// below) — a long-lived shared AbortSignal would otherwise accumulate
+		// one dead closure per request.
+		const abortHandler = () => ctrl.abort();
 		if (options.signal) {
 			if (options.signal.aborted) ctrl.abort();
-			else options.signal.addEventListener("abort", () => ctrl.abort());
+			else options.signal.addEventListener("abort", abortHandler);
 		}
 		let timeoutId;
 		if (options.timeout) {
@@ -138,8 +142,10 @@ export function createRequestor(fetchImpl) {
 
 			if (typeof options.extract === "function") {
 				// Matches real m.request: extract() bypasses the status check
-				// entirely — it decides success/failure itself.
-				return options.extract(response, options);
+				// entirely — it decides success/failure itself. `type` is still
+				// applied afterwards, exactly as upstream does (extract does NOT
+				// skip the type constructor).
+				return applyType(options.extract(response, options), options.type);
 			}
 
 			const ok = response.ok || response.status === 304;
@@ -156,12 +162,24 @@ export function createRequestor(fetchImpl) {
 			});
 		});
 
+		// Detach the caller's signal listener once this request settles, so a
+		// long-lived shared AbortSignal doesn't accumulate a dead closure per
+		// request. Done inside the settled handlers (rather than a separate
+		// `.then`) so an ignored rejection still surfaces as unhandled.
+		const detachSignal = () => {
+			if (options.signal && !options.signal.aborted) {
+				options.signal.removeEventListener("abort", abortHandler);
+			}
+		};
+
 		const result = promise.then(
 			(value) => {
+				detachSignal();
 				if (options.background !== true) sharedRedraw();
 				return value;
 			},
 			(error) => {
+				detachSignal();
 				clearRequestTimeout();
 				if (options.background !== true) sharedRedraw();
 				throw error;
