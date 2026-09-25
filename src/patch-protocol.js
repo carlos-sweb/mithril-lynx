@@ -21,11 +21,13 @@
  * could otherwise re-interpret a reordered opcode silently — a version
  * mismatch throws instead of corrupting the mirrored id space.
  *
- * The value is deliberately outside the 0..17 opcode range (0x4d4c = "ML"
- * in ASCII) so a versioned array can never be misread as an op sequence if
+ * The value is deliberately outside the 0..15 opcode range (0x4d4c was "ML"
+ * in ASCII; bumped to 0x4d4d in 3.0.0, when the Op.CreateList /
+ * Op.SetListItems list protocol was replaced by plain `list`/`list-item`
+ * elements) so a versioned array can never be misread as an op sequence if
  * it is ever fed to `applyPatch()` without the strip.
  */
-export const PROTOCOL_VERSION = 0x4d4c;
+export const PROTOCOL_VERSION = 0x4d4d;
 
 export const Op = Object.freeze({
 	CreateElement: 0,
@@ -56,14 +58,6 @@ export const Op = Object.freeze({
 	// background-thread side.
 	SetGestureDetector: 14, // id, gestureId, gestureType, arenaPolicy
 	RemoveGestureDetector: 15, // id, gestureId
-	// A native virtualized list — see docs/native-papi/papi-06-virtualized-lists.md
-	// in mithril-lynx-ui for the full design. Each list item is rendered on
-	// the BACKGROUND thread, through the app's own real render pass
-	// (list-cell.js), same as everything else in the tree — the main thread
-	// never runs renderItem() itself, only replays the ops that rendering
-	// already produced (apply-patch.js's Op.CreateList case + list-support.js).
-	CreateList: 16, // id, scrollOrientation, listType, spanCount
-	SetListItems: 17, // id, cells — cells: Array<{ typeKey, containerId, ops, rootChildIds }>, one entry per current item, computed by list-cell.js's renderListCell(). `ops` is a flat op array in this SAME encoding, scoped to `containerId` as its root parent id.
 });
 
 /**
@@ -83,8 +77,7 @@ export function pushOp(ops, opcode, ...args) {
 // for walking a flat ops array without re-interpreting it (apply-patch.js's
 // own switch increments `i` inline instead of using this table, since it
 // also needs to look at individual arg values as it goes; this exists for
-// callers that only need to skip/scan, e.g. list-cell.js's
-// findTopLevelChildIds(), which never applies the ops itself).
+// callers that only need to skip/scan an ops array without applying it).
 export const OP_ARITY = Object.freeze({
 	[Op.CreateElement]: 2, // tag, id
 	[Op.CreateElementNS]: 3, // ns, tag, id
@@ -102,8 +95,6 @@ export const OP_ARITY = Object.freeze({
 	[Op.RemoveEvent]: 2, // id, type
 	[Op.SetGestureDetector]: 4, // id, gestureId, gestureType, arenaPolicy
 	[Op.RemoveGestureDetector]: 2, // id, gestureId
-	[Op.CreateList]: 4, // id, scrollOrientation, listType, spanCount
-	[Op.SetListItems]: 2, // id, cells
 });
 
 /** Walks a flat ops array, calling `visit(opcode, args)` once per op — args

@@ -25,6 +25,8 @@
 // side needs to be "a DOM", the other side only needs to be "a PAPI patch
 // applier".
 
+import { TYPED_ATTRIBUTES_BY_TAG } from "./list-attributes.js";
+
 const DASH_CASE = /-/;
 
 /**
@@ -272,22 +274,17 @@ let nextGestureId = 1;
  */
 export class LynxElement extends LynxContainerNode {
 	/**
-	 * `listConfig`, when given, makes this a native virtualized list
-	 * element instead of a plain one — see patch-protocol.js's
-	 * Op.CreateList and docs/native-papi/papi-06-virtualized-lists.md
-	 * (mithril-lynx-ui) for the full design. Not constructed directly;
-	 * use LynxDocument#createNativeList().
+	 * @param {LynxDocument} ownerDocument - The owning document.
+	 * @param {Object} backend - The patch backend that records ops.
+	 * @param {string} tag - The tag name.
+	 * @param {string} [ns] - The namespace URI, if any.
 	 */
-	constructor(ownerDocument, backend, tag, ns, listConfig) {
+	constructor(ownerDocument, backend, tag, ns) {
 		super(ownerDocument);
 		this._backend = backend;
 		this.tag = tag;
 		this.namespaceURI = ns;
-		this._id = listConfig
-			? backend.createList(listConfig.scrollOrientation, listConfig.listType, listConfig.spanCount)
-			: ns
-				? backend.createElementNS(ns, tag)
-				: backend.createElement(tag);
+		this._id = ns ? backend.createElementNS(ns, tag) : backend.createElement(tag);
 		ownerDocument._nodesById.set(this._id, this);
 		this._style = null;
 		this._listeners = Object.create(null);
@@ -333,7 +330,7 @@ export class LynxElement extends LynxContainerNode {
 			// had any style at all (its "old is missing or a string, style is
 			// an object" branch — see mithril-runtime/render/render.js) — so
 			// without this guard, EVERY component with a plain object style
-			// prop (an extremely common pattern, not an edge case) would hit
+			// prop (an extremely common pattern, not an edge case) would
 			// emit a clear op on its very first render. There is no
 			// device-validated bulk-clear PAPI call, so the clear is expanded
 			// here into one RemoveStyleProperty per property actually applied
@@ -450,11 +447,6 @@ export class LynxElement extends LynxContainerNode {
 		this._backend.removeGestureDetector(this._id, gestureId);
 	}
 
-	/** Only meaningful on an element created via LynxDocument#createNativeList(). */
-	setListItems(items) {
-		this._backend.setListItems(this._id, items);
-	}
-
 	/**
 	 * Registers the single listener for an event type; the backend is told only the first time.
 	 * Replaces any previous listener for the same type.
@@ -543,6 +535,96 @@ export class LynxElement extends LynxContainerNode {
 /**
  * A fake-DOM text node backed by a native text element.
  */
+/**
+ * An element whose native attributes are typed (`<list>`, `<list-item>`).
+ * Every catalogued attribute is a real property here (defined on the
+ * per-tag prototype by {@link typedElementClassFor}), so Mithril's property
+ * path assigns raw values — booleans, numbers, the `item-snap` object —
+ * instead of stringifying them or turning `false` into a removal. See
+ * list-attributes.js for why that matters.
+ */
+class LynxTypedElement extends LynxElement {
+	constructor(ownerDocument, backend, tag, ns) {
+		super(ownerDocument, backend, tag, ns);
+		this._typedValues = Object.create(null);
+	}
+
+	/**
+	 * Sets or clears one typed attribute, keeping its raw value. Objects are
+	 * compared by content: Mithril re-assigns object attributes on every
+	 * redraw (render.js `setAttr` never skips `typeof value === "object"`),
+	 * and re-sending an unchanged `item-snap` would be a wasted native write.
+	 * @param {string} name - The attribute name.
+	 * @param {*} value - The raw value; `null`/`undefined` removes the attribute.
+	 * @returns {void}
+	 */
+	_setTypedAttribute(name, value) {
+		const had = name in this._typedValues;
+		if (value == null) {
+			if (!had) return;
+			delete this._typedValues[name];
+			this._backend.removeAttribute(this._id, name);
+			return;
+		}
+		if (had) {
+			const previous = this._typedValues[name];
+			if (previous === value) return;
+			if (typeof value === "object" && typeof previous === "object" && JSON.stringify(previous) === JSON.stringify(value)) return;
+		}
+		this._typedValues[name] = value;
+		this._backend.setAttribute(this._id, name, value);
+	}
+
+	/**
+	 * Catalogued names keep their raw type; everything else behaves like
+	 * {@link LynxElement#setAttribute}.
+	 * @param {string} name - Attribute name.
+	 * @param {*} value - Attribute value.
+	 * @returns {void}
+	 */
+	setAttribute(name, value) {
+		if (TYPED_ATTRIBUTES_BY_TAG[this.tag].includes(name)) this._setTypedAttribute(name, value);
+		else super.setAttribute(name, value);
+	}
+
+	/**
+	 * @param {string} name - Attribute name.
+	 * @returns {void}
+	 */
+	removeAttribute(name) {
+		if (TYPED_ATTRIBUTES_BY_TAG[this.tag].includes(name)) this._setTypedAttribute(name, null);
+		else super.removeAttribute(name);
+	}
+}
+
+const typedElementClasses = Object.create(null);
+
+/**
+ * Returns (and caches) the element class for a typed tag: a subclass of
+ * LynxTypedElement with one accessor per catalogued attribute on its
+ * prototype, so `name in element` holds for Mithril's `hasPropertyKey`.
+ * @param {string} tag - A key of TYPED_ATTRIBUTES_BY_TAG.
+ * @returns {typeof LynxTypedElement}
+ */
+function typedElementClassFor(tag) {
+	let cls = typedElementClasses[tag];
+	if (cls) return cls;
+	cls = class extends LynxTypedElement {};
+	for (const name of TYPED_ATTRIBUTES_BY_TAG[tag]) {
+		Object.defineProperty(cls.prototype, name, {
+			get() {
+				return this._typedValues[name];
+			},
+			set(value) {
+				this._setTypedAttribute(name, value);
+			},
+			configurable: true,
+		});
+	}
+	typedElementClasses[tag] = cls;
+	return cls;
+}
+
 export class LynxText extends LynxNode {
 	/**
 	 * @param {LynxDocument} ownerDocument - The owning document.
@@ -650,6 +732,7 @@ export class LynxDocument extends LynxContainerNode {
 	 * @returns {LynxElement}
 	 */
 	createElement(tag) {
+		if (tag in TYPED_ATTRIBUTES_BY_TAG) return new (typedElementClassFor(tag))(this, this._backend, tag, undefined);
 		return new LynxElement(this, this._backend, tag, undefined);
 	}
 
@@ -678,37 +761,6 @@ export class LynxDocument extends LynxContainerNode {
 	 */
 	createDocumentFragment() {
 		return new LynxFragment(this);
-	}
-
-	/**
-	 * A native virtualized list — see patch-protocol.js's Op.CreateList.
-	 * Populate it via `.setListItems(cells)` (list-cell.js builds `cells`
-	 * from an app's own `items`/`renderItem`) — see
-	 * docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui.
-	 *
-	 * @param {Object} [options] - List configuration.
-	 * @param {string} [options.scrollOrientation="vertical"] - Scroll direction.
-	 * @param {string} [options.listType="single"] - Native list layout type.
-	 * @param {number} [options.spanCount=1] - Number of columns/spans.
-	 * @returns {LynxElement} A native list element.
-	 */
-	createNativeList(options = {}) {
-		return new LynxElement(this, this._backend, "list", undefined, {
-			scrollOrientation: options.scrollOrientation ?? "vertical",
-			listType: options.listType ?? "single",
-			spanCount: options.spanCount ?? 1,
-		});
-	}
-
-	/** Delegates to the backend — see virtual-backend.js's own captureOps
-	 * for what this is for. Kept behind LynxDocument's public surface like
-	 * every other backend interaction in this file, rather than exposing
-	 * `_backend` itself to callers (list-cell.js).
-	 * @param {() => void} fn - The DOM mutation to run.
-	 * @returns {unknown[]} The ops produced by `fn`, removed from the shared buffer.
-	 */
-	captureOps(fn) {
-		return this._backend.captureOps(fn);
 	}
 }
 

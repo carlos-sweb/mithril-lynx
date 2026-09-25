@@ -85,10 +85,12 @@ export function setupRenderer() {
 	engine.addEventListener(renderPageEventName, onRenderPage);
 
 	/**
-	 * Removes the page lifecycle listeners.
+	 * Neutralizes native list callbacks and removes the page lifecycle listeners.
 	 * @returns {void}
 	 */
 	const onDestroyLifetime = () => {
+		// Native lists must not call back into state that is going away.
+		if (applier != null) applier.dispose();
 		engine.removeEventListener(renderPageEventName, onRenderPage);
 		engine.removeEventListener(destroyLifetimeEventName, onDestroyLifetime);
 	};

@@ -6,11 +6,11 @@
 // low-level interpreter of the flat op array straight onto the real
 // Element PAPI, in the spirit of ReactLynx's own `snapshotPatchApply.js`
 // (see rspeedy-react-analysis/LYNX_PAPI_SPEC.md §4.3): a switch over op
-// codes, one real PAPI call per case, nothing else. Op.CreateList's own
-// cell content (list-support.js) is no exception to that: componentAtIndex
-// replays ops the background thread already computed (list-cell.js), the
-// same way this function replays the app's own top-level tree — see
-// docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui.
+// codes, one real PAPI call per case, nothing else. The one element that
+// needs more is Lynx's native `<list>`: its `list-item` children are not
+// inserted natively here but handed to list-runtime.js, which tells native
+// about them through `update-list-info` and attaches each one only when
+// native asks for it (componentAtIndex).
 //
 // The exact `__Create*`/pageId contract below (one `pageId` shared by every
 // element on a page, `__CreateView`/`__CreateText`/generic `__CreateElement`
@@ -23,7 +23,8 @@
 // commit/reload layer (commit.js, reload/*.js), never in this mapping.
 
 import { Op } from "./patch-protocol.js";
-import { createNativeList } from "./list-support.js";
+import { LIST_ITEM_VIRTUAL_ATTRIBUTES } from "./list-attributes.js";
+import { createListRuntime, isListItemPlatformAttribute } from "./list-runtime.js";
 
 // --- Native gesture support (Op.SetGestureDetector) ------------------------
 //
@@ -254,14 +255,8 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
  * @param {boolean} [options.flush] - Whether `applyPatch` calls the bare,
  *   whole-page `__FlushElementTree()` after applying its ops. Defaults to
  *   `true` — the right default for the ONE real top-level applier per page
- *   (main-thread.js's own use). `false` for a per-cell applier
- *   (list-support.js): a list cell's real commit point is the list-specific
- *   `__FlushElementTree(wrapperHandle, {triggerLayout, operationID,
- *   elementID, listID})` call list-support.js already makes right after —
- *   calling the bare, whole-page flush too, from inside native's own
- *   synchronous componentAtIndex callback, is a second, unrelated flush this
- *   applier was never meant to trigger on that call site's behalf.
- * @returns {{registerPageRoot: (pageElementHandle: *) => void, registerRoot: (id: number, handle: *) => void, applyPatch: (ops: unknown[]) => void, getHandle: (id: number) => *}} The patch applier.
+ *   (main-thread.js's own use). `false` when the caller commits by itself.
+ * @returns {{registerPageRoot: (pageElementHandle: *) => void, registerRoot: (id: number, handle: *) => void, applyPatch: (ops: unknown[]) => void, getHandle: (id: number) => *, dispose: () => void}} The patch applier.
  */
 export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// id (as allocated by the background's virtual backend) -> real PAPI
@@ -269,11 +264,15 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// fake-dom.js's LynxDocument) — pre-seeded here so the very first
 	// InsertBefore/AppendChild targeting id 0 has somewhere real to land.
 	const handles = new Map();
-	// list id -> its setCells(cells) function (list-support.js) — kept here,
-	// not as a property on the list's own handle: a real native list handle
-	// does not reliably hold a custom property across calls (confirmed on
-	// device), only `handles` (a plain Map) does.
-	const listSetters = new Map();
+	// list id -> its list-runtime.js state — kept here, not as a property on
+	// the list's own handle: a real native list handle does not reliably hold
+	// a custom property across calls (confirmed on device), only a plain Map
+	// does.
+	const lists = new Map();
+	// list-item id -> its platform info (item-key, full-span, sticky-*, …),
+	// collected from its attribute ops. Kept even before the item is inserted
+	// into a list: Mithril sets an element's attributes before inserting it.
+	const itemInfo = new Map();
 
 	// id -> Map<event type, listener callback>. `__AddEventListener` needs the
 	// exact callback reference back when `__RemoveEventListener` runs, so the
@@ -291,7 +290,7 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// removeDOM (render.js) only ever calls removeChild on the ROOT of a
 	// removed subtree — descendants never get an Op.RemoveChild of their own —
 	// so without this, every descendant's `handles`/`eventListeners`/
-	// `listSetters`/`gestureWorklets` entry would outlive the removal, and
+	// `lists`/`itemInfo`/`gestureWorklets` entry would outlive the removal, and
 	// `handles` (plus the worklet registry) would keep the whole detached
 	// native subtree reachable from JS.
 	const childrenOf = new Map(); // parent id -> Set<child id>
@@ -303,7 +302,8 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	 * stack. Native listeners and gesture detectors are not removed one by
 	 * one: they live on the native elements, which go away with the detached
 	 * subtree once JS stops holding their handles (including through the
-	 * gesture worklets, which are unregistered here).
+	 * gesture worklets, which are unregistered here). A removed native list
+	 * also gets its callbacks neutralized.
 	 * @param {number} id - The root of the removed subtree.
 	 * @returns {void}
 	 */
@@ -319,7 +319,12 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 			parentOf.delete(current);
 			handles.delete(current);
 			eventListeners.delete(current);
-			listSetters.delete(current);
+			itemInfo.delete(current);
+			const list = lists.get(current);
+			if (list != null) {
+				list.destroy();
+				lists.delete(current);
+			}
 			const gestures = gestureWorklets.get(current);
 			if (gestures != null) {
 				for (const workletIds of gestures.values()) unregisterWorklets(workletIds);
@@ -328,10 +333,8 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		}
 	}
 
-	/** General form: seed the mapping for any id, not just the page root —
-	 * list-support.js uses this to alias a list-cell.js `containerId` (an
-	 * off-tree id from the background thread's OWN document) to the real
-	 * native wrapper element it created for that cell.
+	/** General form: seed the mapping for any id, not just the page root
+	 * (tests use it to mount a subtree under an element they created).
 	 * @param {number} id - The background-side id to alias.
 	 * @param {*} handle - The real PAPI element handle it maps to.
 	 * @returns {void}
@@ -361,15 +364,31 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	}
 
 	/**
+	 * Records one platform attribute of a list item: it travels to native in
+	 * `update-list-info` (list-runtime.js), and is also set on the element
+	 * itself unless it is one of the list-only virtual attributes.
+	 * @param {number} id - The list-item id.
+	 * @param {string} name - A platform attribute name.
+	 * @param {*} value - Its value; `null` removes it.
+	 * @returns {void}
+	 */
+	function setItemInfo(id, name, value) {
+		const info = itemInfo.get(id);
+		if (value == null) delete info[name];
+		else info[name] = value;
+		const list = lists.get(parentOf.get(id));
+		if (list != null) list.updateInfo(id, info);
+		if (!LIST_ITEM_VIRTUAL_ATTRIBUTES.includes(name)) __SetAttribute(handles.get(id), name, value == null ? null : value);
+	}
+
+	/**
 	 * Applies one commit's worth of ops, then — unless this applier was
 	 * created with `flush: false` (see this function's own constructor
 	 * options above) — flushes exactly once with the bare, whole-page
 	 * `__FlushElementTree()`; that call is the real commit for the ONE
-	 * top-level applier per page, never looked up through a global. A
-	 * per-cell applier (list-support.js) passes `flush: false` and issues
-	 * its own list-specific `__FlushElementTree(wrapperHandle, {...})` call
-	 * afterward instead — that one, not this one, is that cell's real
-	 * commit point.
+	 * top-level applier per page, never looked up through a global. Every
+	 * native list that changed sends its `update-list-info` just before
+	 * that flush.
 	 * @param {unknown[]} ops - A flat op array (opcode followed by its arguments, repeated).
 	 * @returns {void}
 	 * @throws {Error} If an unknown opcode is encountered, or `Op.RemoveEvent` needs `__RemoveEventListener` and it is unavailable.
@@ -381,6 +400,13 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 				case Op.CreateElement: {
 					const tag = ops[i++];
 					const id = ops[i++];
+					if (tag === "list") {
+						const list = createListRuntime(pageId);
+						lists.set(id, list);
+						handles.set(id, list.handle);
+						break;
+					}
+					if (tag === "list-item") itemInfo.set(id, {});
 					handles.set(id, createElementHandle(tag));
 					break;
 				}
@@ -407,14 +433,25 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const refId = ops[i++];
 					const parent = handles.get(parentId);
 					const child = handles.get(childId);
-					if (refId === -1) {
+					const previousParentId = parentOf.get(childId);
+					const list = lists.get(parentId);
+					// Leaving a list for another parent: the old list drops it
+					// (and detaches it natively if it was on screen).
+					if (previousParentId !== undefined && previousParentId !== parentId) {
+						const previousList = lists.get(previousParentId);
+						if (previousList != null) previousList.remove(childId);
+						else if (list != null) __RemoveElement(handles.get(previousParentId), child);
+					}
+					if (list != null) {
+						// List children are attached natively only on demand.
+						list.insert(childId, child, itemInfo.get(childId) ?? {}, refId);
+					} else if (refId === -1) {
 						__AppendElement(parent, child);
 					} else {
 						__InsertElementBefore(parent, child, handles.get(refId));
 					}
 					// A move (the child already had a parent) detaches it from
 					// the old parent's set first.
-					const previousParentId = parentOf.get(childId);
 					if (previousParentId !== undefined) childrenOf.get(previousParentId)?.delete(childId);
 					let siblings = childrenOf.get(parentId);
 					if (siblings == null) childrenOf.set(parentId, (siblings = new Set()));
@@ -425,7 +462,9 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 				case Op.RemoveChild: {
 					const parentId = ops[i++];
 					const childId = ops[i++];
-					__RemoveElement(handles.get(parentId), handles.get(childId));
+					const list = lists.get(parentId);
+					if (list != null) list.remove(childId);
+					else __RemoveElement(handles.get(parentId), handles.get(childId));
 					childrenOf.get(parentId)?.delete(childId);
 					releaseSubtree(childId);
 					break;
@@ -444,6 +483,7 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					// in this rewrite's own test suite had set `id` before.
 					if (name === "class") __SetClasses(handle, value == null ? "" : value);
 					else if (name === "id") __SetID(handle, value == null ? null : value);
+					else if (itemInfo.has(id) && isListItemPlatformAttribute(name)) setItemInfo(id, name, value);
 					else __SetAttribute(handle, name, value);
 					break;
 				}
@@ -453,6 +493,7 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const handle = handles.get(id);
 					if (name === "class") __SetClasses(handle, "");
 					else if (name === "id") __SetID(handle, null);
+					else if (itemInfo.has(id) && isListItemPlatformAttribute(name)) setItemInfo(id, name, null);
 					else __SetAttribute(handle, name, null);
 					break;
 				}
@@ -567,26 +608,12 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					}
 					break;
 				}
-				case Op.CreateList: {
-					const id = ops[i++];
-					const scrollOrientation = ops[i++];
-					const listType = ops[i++];
-					const spanCount = ops[i++];
-					const { handle, setCells } = createNativeList(pageId, scrollOrientation, listType, spanCount, createPatchApplier, onEvent);
-					handles.set(id, handle);
-					listSetters.set(id, setCells);
-					break;
-				}
-				case Op.SetListItems: {
-					const id = ops[i++];
-					const cells = ops[i++];
-					listSetters.get(id)(cells);
-					break;
-				}
 				default:
 					throw new Error(`[mithril-lynx] Unknown patch opcode: ${opcode}`);
 			}
 		}
+		// Each list that changed tells native about it before the commit.
+		for (const list of lists.values()) list.flushUpdates();
 		if (flush) __FlushElementTree();
 	}
 
@@ -607,6 +634,16 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		 */
 		getHandle(id) {
 			return handles.get(id);
+		},
+		/**
+		 * Neutralizes every native list's callbacks — for the page's
+		 * `__DestroyLifetime`, after which native must not call back into
+		 * this applier's state.
+		 * @returns {void}
+		 */
+		dispose() {
+			for (const list of lists.values()) list.destroy();
+			lists.clear();
 		},
 	};
 }

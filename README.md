@@ -15,7 +15,17 @@ The old implementation's core bugs all traced back to the same root cause: wheth
   - **B — structural reload**: adding/removing/reordering tree nodes. The old version assumed this *had* to be a full reload; this one lets Mithril's own real diff (running in the background against a real tree) produce the right Create/Insert/Remove ops instead — no separate wire-protocol mode needed, just reconciliation that doesn't discard nodes that didn't change.
   - **C — full reload**: fallback for what A/B can't resolve (new imports, changed dependencies, an unrecoverable error). Same CDP `Page.reload` mechanism stabilized in the old version's 0.0.9, rewritten on the new core.
 
-**Carried over as code, not yet device-verified**: gestures and list virtualization (Tier 2) exist in this rewrite — `src/apply-patch.js`'s `Op.SetGestureDetector`/`Op.CreateList` cases, `src/list-cell.js`, `src/list-support.js` — and are exported as `mithril-lynx/list-support` and `mithril-lynx/list-cell`. The new arena-claim gesture path is explicitly unverified on a real device (see the note in `apply-patch.js`). **Deliberately not carried over at all (yet)**: the imperative ref helpers and the old stack-based `navigation` module. Those were real, device-verified capabilities in v1 — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
+**Carried over as code, not yet device-verified**: gestures (`src/apply-patch.js`'s `Op.SetGestureDetector`) and Lynx's native virtualized `<list>` exist in this rewrite. The new arena-claim gesture path is explicitly unverified on a real device (see the note in `apply-patch.js`).
+
+**Native `<list>` (3.0.0+)**: `list` and `list-item` are ordinary Mithril elements — render them like any other, key the items, and Mithril's own keyed diff drives the native list:
+
+```js
+m("list", { "list-type": "single", "span-count": 1, "scroll-orientation": "vertical",
+            "lower-threshold-item-count": 2, onscrolltolower: loadMore },
+  items.map((it) => m("list-item", { key: it.id, "item-key": it.id }, row(it))))
+```
+
+Every documented `<list>` attribute (`bounces`, `item-snap`, `sticky`, `update-animation`, …) and `<list-item>` attribute (`full-span`, `sticky-top`/`-bottom`, `estimated-main-axis-size-px`, `reuse-identifier`, `recyclable`) is passed with its real type — booleans and objects included (`src/list-attributes.js` is the catalog). Events use the usual `on*` attrs (`onscroll`, `onscrolltoupper`, `onscrolltolower`, `onscrollstatechange`, `onlayoutcomplete`, `onsnap`); methods (`scrollToPosition`, `scrollBy`, `autoScroll`, `getVisibleCells`) go through a selector query on the list's `id`. `item-key` must be unique and stable — use the same value as `key`. The main-thread side (`src/list-runtime.js`) follows @lynx-js/react's element-template list: each item keeps its own element tree and is attached only when native asks for it. 3.0.0 removes the previous `Op.CreateList`/`Op.SetListItems` protocol and the `mithril-lynx/list-cell` / `mithril-lynx/list-support` entry points. **Deliberately not carried over at all (yet)**: the imperative ref helpers and the old stack-based `navigation` module. Those were real, device-verified capabilities in v1 — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
 
 ## Usage
 

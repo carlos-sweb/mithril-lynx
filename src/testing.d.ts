@@ -4,6 +4,8 @@ export interface PatchApplier {
 	/** The real PAPI element handle for a given background-side id, or
 	 * `undefined` if nothing was ever created for it. */
 	getHandle(id: unknown): unknown;
+	/** Neutralizes every native list's callbacks (for `__DestroyLifetime`). */
+	dispose(): void;
 }
 
 /** See apply-patch.js's own header for the exact op vocabulary this replays. */

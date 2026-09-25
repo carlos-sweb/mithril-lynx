@@ -10,7 +10,7 @@ import { Op, pushOp } from "../patch-protocol.js";
 
 /**
  * Creates the background-thread patch backend: every call appends one op to a flat buffer.
- * @returns {{allocId: () => number, createElement: (tag: string) => number, createElementNS: (ns: string, tag: string) => number, createText: (text: string) => number, insertBefore: (parentId: number, childId: number, refId?: number) => void, removeChild: (parentId: number, childId: number) => void, setAttribute: (id: number, name: string, value: string|null) => void, removeAttribute: (id: number, name: string) => void, setAttributeNS: (id: number, ns: string|null, name: string, value: string|null) => void, setClasses: (id: number, value: string) => void, setStyleProperty: (id: number, name: string, value: string) => void, removeStyleProperty: (id: number, name: string) => void, setText: (id: number, value: string) => void, addEvent: (id: number, type: string) => void, removeEvent: (id: number, type: string) => void, setGestureDetector: (id: number, gestureId: number, gestureType: string, arenaPolicy: string) => void, removeGestureDetector: (id: number, gestureId: number) => void, createList: (scrollOrientation: string, listType: string, spanCount: number) => number, setListItems: (id: number, cells: unknown[]) => void, takeOps: () => unknown[]|null, captureOps: (fn: () => void) => unknown[]}} The backend object.
+ * @returns {{allocId: () => number, createElement: (tag: string) => number, createElementNS: (ns: string, tag: string) => number, createText: (text: string) => number, insertBefore: (parentId: number, childId: number, refId?: number) => void, removeChild: (parentId: number, childId: number) => void, setAttribute: (id: number, name: string, value: *) => void, removeAttribute: (id: number, name: string) => void, setAttributeNS: (id: number, ns: string|null, name: string, value: string|null) => void, setClasses: (id: number, value: string) => void, setStyleProperty: (id: number, name: string, value: string) => void, removeStyleProperty: (id: number, name: string) => void, setText: (id: number, value: string) => void, addEvent: (id: number, type: string) => void, removeEvent: (id: number, type: string) => void, setGestureDetector: (id: number, gestureId: number, gestureType: string, arenaPolicy: string) => void, removeGestureDetector: (id: number, gestureId: number) => void, takeOps: () => unknown[]|null}} The backend object.
  */
 export function createVirtualBackend() {
 	let nextId = 1;
@@ -73,7 +73,7 @@ export function createVirtualBackend() {
 		/**
 		 * @param {number} id - Element id.
 		 * @param {string} name - Attribute name.
-		 * @param {string|null} value - Attribute value.
+		 * @param {*} value - Attribute value: a string, or a raw typed value for a catalogued list/list-item attribute.
 		 * @returns {void}
 		 */
 		setAttribute(id, name, value) {
@@ -167,45 +167,12 @@ export function createVirtualBackend() {
 		removeGestureDetector(id, gestureId) {
 			pushOp(ops, Op.RemoveGestureDetector, id, gestureId);
 		},
-		/**
-		 * @param {string} scrollOrientation - Scroll direction.
-		 * @param {string} listType - Native list layout type.
-		 * @param {number} spanCount - Number of columns/spans.
-		 * @returns {number} The new list element's id.
-		 */
-		createList(scrollOrientation, listType, spanCount) {
-			const id = nextId++;
-			pushOp(ops, Op.CreateList, id, scrollOrientation, listType, spanCount);
-			return id;
-		},
-		/**
-		 * @param {number} id - List element id.
-		 * @param {unknown[]} cells - The list's cell descriptors.
-		 * @returns {void}
-		 */
-		setListItems(id, cells) {
-			pushOp(ops, Op.SetListItems, id, cells);
-		},
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {
 			if (ops.length === 0) return null;
 			const out = ops;
 			ops = [];
 			return out;
-		},
-		/**
-		 * Runs `fn` (a DOM mutation against a node from THIS backend's own
-		 * document — same id space as everything else, so event dispatch
-		 * keeps working normally) and returns just the ops it produced,
-		 * removing them from the shared buffer so they never also go out
-		 * with the next `takeOps()`. Used by list-cell.js to render one list
-		 * item off-tree and ship its construction ops separately, instead of
-		 * as part of the app's own visible-tree patch.
-		 */
-		captureOps(fn) {
-			const start = ops.length;
-			fn();
-			return ops.splice(start, ops.length - start);
 		},
 	};
 }

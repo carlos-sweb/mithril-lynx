@@ -31,7 +31,7 @@ export { createPatchApplier } from "./apply-patch.js";
  * piece is __AddEventListener/__RemoveEventListener (the testing environment
  * only implements the string/worklet-event __AddEvent family that ReactLynx
  * uses; mithril-lynx binds real JS function listeners directly). Gesture and
- * list ops (Op.SetGestureDetector/Op.CreateList) are covered by the testing
+ * list elements (Op.SetGestureDetector, `list`/`list-item`) are covered by the testing
  * environment itself, not by this polyfill — see test/gesture.test.ts and
  * test/list.test.ts.
  * @param {{lynx: Object}} target - The main-thread globals object from `@lynx-js/testing-environment`.
