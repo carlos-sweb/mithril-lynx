@@ -484,7 +484,10 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					if (name === "class") __SetClasses(handle, value == null ? "" : value);
 					else if (name === "id") __SetID(handle, value == null ? null : value);
 					else if (itemInfo.has(id) && isListItemPlatformAttribute(name)) setItemInfo(id, name, value);
-					else __SetAttribute(handle, name, value);
+					else {
+						if (name === "update-animation" && lists.has(id)) lists.get(id).setUpdateAnimation(value);
+						__SetAttribute(handle, name, value);
+					}
 					break;
 				}
 				case Op.RemoveAttribute: {
@@ -494,7 +497,10 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					if (name === "class") __SetClasses(handle, "");
 					else if (name === "id") __SetID(handle, null);
 					else if (itemInfo.has(id) && isListItemPlatformAttribute(name)) setItemInfo(id, name, null);
-					else __SetAttribute(handle, name, null);
+					else {
+						if (name === "update-animation" && lists.has(id)) lists.get(id).setUpdateAnimation(null);
+						__SetAttribute(handle, name, null);
+					}
 					break;
 				}
 				case Op.SetAttributeNS: {
@@ -615,6 +621,11 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		// Each list that changed tells native about it before the commit.
 		for (const list of lists.values()) list.flushUpdates();
 		if (flush) __FlushElementTree();
+		// On-screen items a list just removed can only be detached once native
+		// has processed that removal (see list-runtime.js's remove()).
+		let detached = false;
+		for (const list of lists.values()) if (list.detachRemoved()) detached = true;
+		if (detached && flush) __FlushElementTree();
 	}
 
 	return {

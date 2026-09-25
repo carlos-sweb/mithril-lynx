@@ -70,7 +70,7 @@ function typeOf(item) {
 /**
  * Creates one native list and the state behind it.
  * @param {number} pageId - The page's unique id.
- * @returns {{handle: *, insert: (id: number, handle: *, info: Object, refId: number) => void, remove: (id: number) => void, has: (id: number) => boolean, updateInfo: (id: number, info: Object) => void, flushUpdates: () => void, destroy: () => void}}
+ * @returns {{handle: *, insert: (id: number, handle: *, info: Object, refId: number) => void, remove: (id: number) => void, has: (id: number) => boolean, updateInfo: (id: number, info: Object) => void, setUpdateAnimation: (value: *) => void, flushUpdates: () => void, detachRemoved: () => boolean, destroy: () => void}}
  */
 export function createListRuntime(pageId) {
 	/** @type {Array<{id: number, handle: *, info: Object<string, *>, attached: boolean, needsAttachMove: boolean, skipNextEnqueue: boolean}>} */
@@ -79,6 +79,27 @@ export function createListRuntime(pageId) {
 	const itemsBySign = new Map();
 	let hasAttachedMoves = false;
 	let destroyed = false;
+	// On-screen items removed by the current patch, detached only after the
+	// patch's flush (see remove()).
+	let removedAttached = [];
+	// Mirrors the list's `update-animation` attribute (see remove()).
+	let animatesUpdates = false;
+
+	/**
+	 * Records the list's `update-animation` attribute.
+	 * @param {*} value - The attribute value.
+	 * @returns {void}
+	 */
+	function setUpdateAnimation(value) {
+		animatesUpdates = value === "default";
+		if (animatesUpdates && typeof console !== "undefined") {
+			console.warn(
+				"[mithril-lynx] list: update-animation=\"default\" is not fully supported yet — removed items stay " +
+					"attached to the list element (detaching them while native animates crashes Lynx). " +
+					"See docs/native-papi/papi-07-list-redesign.md in mithril-lynx-ui.",
+			);
+		}
+	}
 	// Set while a patch is changing this list: the item order and infos as
 	// they were BEFORE the patch, plus what was inserted/removed since.
 	let pending = null;
@@ -139,7 +160,21 @@ export function createListRuntime(pageId) {
 	}
 
 	/**
-	 * Removes an item from the list, detaching it if it is on screen.
+	 * Removes an item from the list's data. An item that is on screen is
+	 * detached from the list element only AFTER native has processed this
+	 * patch's `removeAction` (see detachRemoved()). Verified on a real device
+	 * (Android, Lynx Go):
+	 *   - detaching it here, before `update-list-info` is flushed, makes
+	 *     native fail to find the item's holder and crash (SIGSEGV after
+	 *     "[List] Fail to erase item holder");
+	 *   - never detaching it renders fine (native drops its cell) but leaves
+	 *     its element as an orphan child of the list, growing with every
+	 *     removal — native never calls `enqueueComponent` for removed items;
+	 *   - detaching it after the flush is clean, EXCEPT while an
+	 *     `update-animation` is running on the list: native animates the
+	 *     removed cell and crashes when the animation ends if its element is
+	 *     gone. So with `update-animation="default"` removed items are left
+	 *     attached (see setUpdateAnimation()).
 	 * @param {number} id - Item id.
 	 * @returns {void}
 	 */
@@ -151,11 +186,37 @@ export function createListRuntime(pageId) {
 		itemsById.delete(id);
 		if (p.beforeIndexById.has(id)) p.removeIds.add(id);
 		p.insertIds.delete(id);
-		if (item.attached && !destroyed) {
+		if (item.attached) removedAttached.push(item);
+		else forgetSigns(item);
+	}
+
+	/**
+	 * Drops every sign that maps to `item`.
+	 * @param {Object} item - The item record.
+	 * @returns {void}
+	 */
+	function forgetSigns(item) {
+		for (const [sign, bound] of itemsBySign) if (bound === item) itemsBySign.delete(sign);
+	}
+
+	/**
+	 * Detaches the on-screen items removed by the last patch. Must run after
+	 * that patch's `update-list-info` has been flushed to native.
+	 * @returns {boolean} Whether anything was detached (and needs a flush).
+	 */
+	function detachRemoved() {
+		if (removedAttached.length === 0) return false;
+		const detached = removedAttached;
+		removedAttached = [];
+		let any = false;
+		for (const item of detached) {
+			forgetSigns(item);
+			if (!item.attached || destroyed || animatesUpdates) continue;
 			__RemoveElement(handle, item.handle);
 			item.attached = false;
+			any = true;
 		}
-		for (const [sign, bound] of itemsBySign) if (bound === item) itemsBySign.delete(sign);
+		return any;
 	}
 
 	/**
@@ -340,6 +401,7 @@ export function createListRuntime(pageId) {
 		items = [];
 		itemsById.clear();
 		itemsBySign.clear();
+		removedAttached = [];
 		pending = null;
 	}
 
@@ -350,12 +412,14 @@ export function createListRuntime(pageId) {
 		insert,
 		remove,
 		updateInfo,
+		setUpdateAnimation,
 		/**
 		 * @param {number} id - Item id.
 		 * @returns {boolean} Whether the item is in this list.
 		 */
 		has: (id) => itemsById.has(id),
 		flushUpdates,
+		detachRemoved,
 		destroy,
 	};
 }

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "@rstest/core";
+import { afterEach, describe, expect, it, rstest } from "@rstest/core";
 import m from "mithril-runtime";
 import { createPatchApplier } from "../src/apply-patch.js";
 import { renderApp } from "../src/background.js";
@@ -71,18 +71,21 @@ function mount(view: () => unknown) {
 	});
 
 	let applied = 0;
-	/** Applies pending patches on the main thread and returns their ops. */
-	const flush = () => {
+	/** Applies pending patches on the main thread and returns their ops.
+	 * `beforeApply` runs on the main thread right before (to install spies:
+	 * switching threads re-injects the main-thread globals). */
+	const flush = (beforeApply?: () => void) => {
 		const fresh = patches.slice(applied);
 		applied = patches.length;
 		toMainThread();
+		beforeApply?.();
 		for (const ops of fresh) applier.applyPatch(ops);
 		return fresh;
 	};
-	const redraw = () => {
+	const redraw = (beforeApply?: () => void) => {
 		lynxTestingEnv.switchToBackgroundThread();
 		app.redraw();
-		return flush();
+		return flush(beforeApply);
 	};
 	flush();
 	const listNode = () => findByTag(app.document, "list");
@@ -345,14 +348,50 @@ describe("native callbacks", () => {
 		expect(itemHandle("a").textContent).toBe("two");
 	});
 
-	it("removing an attached item detaches it natively", () => {
+	/** Removes "a" (on screen) and returns the list-related PAPI calls in order. */
+	function removeOnScreenItem(listAttrs: object) {
 		let keys = ["a", "b"];
-		const { redraw, requestCell, attachedKeys } = mount(listView(() => keys));
-		requestCell(0);
-		requestCell(1);
+		const warn = rstest.spyOn(console, "warn").mockImplementation(() => {});
+		const app = mount(listView(() => keys, () => ({}), () => listAttrs));
+		warn.mockRestore();
+		const signA = app.requestCell(0);
+		app.requestCell(1);
+		const calls: string[] = [];
 		keys = ["b"];
-		redraw();
+		app.redraw(() => {
+			const flush = (globalThis as any).__FlushElementTree;
+			const remove = (globalThis as any).__RemoveElement;
+			(globalThis as any).__FlushElementTree = (...args: any[]) => {
+				calls.push("flush");
+				return flush(...args);
+			};
+			(globalThis as any).__RemoveElement = (parent: any, child: any) => {
+				if (parent === app.listHandle()) calls.push("detach " + child.getAttribute("item-key"));
+				return remove(parent, child);
+			};
+		});
+		lynxTestingEnv.switchToBackgroundThread();
+		lynxTestingEnv.switchToMainThread();
+		return { ...app, calls, signA };
+	}
+
+	it("a removed on-screen item is detached only after the patch's update-list-info flush", () => {
+		// Verified on a real device (Android, Lynx Go): detaching before native
+		// processed the removeAction crashed (SIGSEGV after "[List] Fail to
+		// erase item holder"), and native never enqueues removed items, so not
+		// detaching left orphan children accumulating under the list.
+		const { calls, attachedKeys, releaseCell, signA } = removeOnScreenItem({});
+		expect(calls).toEqual(["flush", "detach a", "flush"]);
 		expect(attachedKeys()).toEqual(["b"]);
+		// A late enqueue for it (other native versions) is a harmless no-op.
+		releaseCell(signA);
+		expect(attachedKeys()).toEqual(["b"]);
+	});
+
+	it("with update-animation on, a removed on-screen item is left attached (detaching it crashes native)", () => {
+		const { calls, attachedKeys } = removeOnScreenItem({ "update-animation": "default" });
+		expect(calls).toEqual(["flush"]);
+		expect(attachedKeys()).toEqual(["a", "b"]);
 	});
 });
 
