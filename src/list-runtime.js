@@ -96,7 +96,7 @@ export function createListRuntime(pageId) {
 			console.warn(
 				"[mithril-lynx] list: update-animation=\"default\" is not fully supported yet — removed items stay " +
 					"attached to the list element (detaching them while native animates crashes Lynx). " +
-					"See docs/native-papi/papi-07-list-redesign.md in mithril-lynx-ui.",
+					"See UPDATE_ANIMATION_GAP.md in mithril-lynx.",
 			);
 		}
 	}
