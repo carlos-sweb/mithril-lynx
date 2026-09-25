@@ -452,14 +452,14 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 				case Op.RemoveStyleProperty: {
 					const id = ops[i++];
 					const name = ops[i++];
-					// `"*"` is fake-dom.js's encoding of `element.style = ""`
-					// (clear everything) — there is no bulk-clear PAPI call
-					// validated yet, so this case is a documented gap for
-					// F3, not a silent no-op: it throws so the gap surfaces
-					// as a test failure rather than a mystery on-device.
+					// fake-dom.js expands `element.style = ""` into one op per
+					// applied property, so a bulk `"*"` name reaching here means
+					// a desynced or foreign op producer — a protocol invariant
+					// violation, not a gap to paper over.
 					if (name === "*") {
 						throw new Error(
-							"[mithril-lynx] Clearing the whole `style` object at once is not implemented yet (F3 TODO) — set individual properties to \"\" instead.",
+							"[mithril-lynx] Protocol error: bulk style clear ('*') should never reach apply-patch — " +
+								"fake-dom.js must expand it to individual RemoveStyleProperty ops.",
 						);
 					}
 					__AddInlineStyle(handles.get(id), name, "");

@@ -214,7 +214,7 @@ function createStyleProxy(element) {
 		 * @returns {void}
 		 */
 		setProperty(name, value) {
-			element._styleEverSet = true;
+			element._activeStylesSet.add(name);
 			element._backend.setStyleProperty(element._id, name, String(value));
 		},
 		/**
@@ -222,6 +222,7 @@ function createStyleProxy(element) {
 		 * @returns {void}
 		 */
 		removeProperty(name) {
+			element._activeStylesSet.delete(name);
 			element._backend.removeStyleProperty(element._id, name);
 		},
 	};
@@ -249,9 +250,10 @@ function createStyleProxy(element) {
 			// key shape regardless of which of Mithril's two style paths ran.
 			const name = DASH_CASE.test(prop) ? prop : camelToDash(prop);
 			if (value === "" || value == null) {
+				element._activeStylesSet.delete(name);
 				element._backend.removeStyleProperty(element._id, name);
 			} else {
-				element._styleEverSet = true;
+				element._activeStylesSet.add(name);
 				element._backend.setStyleProperty(element._id, name, String(value));
 			}
 			return true;
@@ -288,7 +290,6 @@ export class LynxElement extends LynxContainerNode {
 				: backend.createElement(tag);
 		ownerDocument._nodesById.set(this._id, this);
 		this._style = null;
-		this._styleEverSet = false;
 		this._listeners = Object.create(null);
 		// `hasPropertyKey` (CONTRACT.md §e) requires `"value" in vnode.dom` etc.
 		// to be true for the property-write fast path to apply to form
@@ -308,6 +309,18 @@ export class LynxElement extends LynxContainerNode {
 	}
 
 	/**
+	 * Dash-case names of the style properties currently applied to this
+	 * element, created lazily like `style` itself. Lets `style = ""` expand
+	 * into one RemoveStyleProperty op per property actually set, since there
+	 * is no device-validated bulk-clear PAPI call.
+	 * @returns {Set<string>}
+	 */
+	get _activeStylesSet() {
+		if (!this._activeStyles) this._activeStyles = new Set();
+		return this._activeStyles;
+	}
+
+	/**
 	 * Replaces the element's style. `""`/`null` clears it, an object assigns each key,
 	 * and a CSS text string is unsupported (a warning is logged).
 	 * @param {Object|string|null} value - The new style.
@@ -321,14 +334,16 @@ export class LynxElement extends LynxContainerNode {
 			// an object" branch — see mithril-runtime/render/render.js) — so
 			// without this guard, EVERY component with a plain object style
 			// prop (an extremely common pattern, not an edge case) would hit
-			// apply-patch.js's "bulk-clear not implemented" throw on its very
-			// first render. `_styleEverSet` (set by createStyleProxy whenever
-			// a real property is written) is exactly "was there anything to
-			// clear" — skip emitting the op at all when there wasn't; the
-			// throw still fires for the genuine case (an update actually
-			// replacing a previously-set style), where a real bulk-clear PAPI
-			// call would actually be needed and hasn't been validated yet.
-			if (this._styleEverSet) this._backend.removeStyleProperty(this._id, "*");
+			// emit a clear op on its very first render. There is no
+			// device-validated bulk-clear PAPI call, so the clear is expanded
+			// here into one RemoveStyleProperty per property actually applied
+			// (tracked by createStyleProxy). The set is read through its
+			// backing field so a clear on an element that never had a style
+			// neither creates it nor emits anything.
+			const active = this._activeStyles;
+			if (active == null || active.size === 0) return;
+			for (const name of active) this._backend.removeStyleProperty(this._id, name);
+			active.clear();
 			return;
 		}
 		if (typeof value !== "object") {
