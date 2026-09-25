@@ -52,6 +52,10 @@ const DEV_TRANSPORT_NOOP_PATH = path.join(
  * Builds the query string the in-bundle dev-reload client reads its config
  * from — unchanged from v1's version (build-tooling glue, not part of the
  * bug this rewrite is about).
+ * @param {Object} api - The Rsbuild plugin API.
+ * @param {Object} environment - The current build environment.
+ * @param {string} entryName - The entry (page) name.
+ * @returns {string} The query string, without the leading `?`.
  */
 function createDevReloadClientQuery(api, environment, entryName) {
 	const config = environment.config ?? {};
@@ -83,6 +87,12 @@ function createDevReloadClientQuery(api, environment, entryName) {
 	return params.toString();
 }
 
+/**
+ * Finds the first existing file among `candidates` in `dir`.
+ * @param {string} dir - The directory to search.
+ * @param {string[]} candidates - File names in priority order.
+ * @returns {string|null} The full path of the first match, or `null`.
+ */
 function findSibling(dir, candidates) {
 	for (const name of candidates) {
 		const candidate = path.join(dir, name);
@@ -91,6 +101,12 @@ function findSibling(dir, candidates) {
 	return null;
 }
 
+/**
+ * Walks up from a resolved file to the root of the named package.
+ * @param {string} resolvedFile - A file inside the package.
+ * @param {string} expectedName - The package `name` to look for.
+ * @returns {string|null} The package root directory, or `null` when not found within 10 levels.
+ */
 function packageRootOf(resolvedFile, expectedName) {
 	let dir = path.dirname(resolvedFile);
 	for (let i = 0; i < 10; i++) {
@@ -107,12 +123,24 @@ function packageRootOf(resolvedFile, expectedName) {
 	return null;
 }
 
+/**
+ * Creates the Rsbuild plugin that builds a mithril-lynx app's background and main-thread bundles.
+ * @param {Object} [options] - Plugin options.
+ * @param {string} [options.targetSdkVersion="3.5"] - Lynx target SDK version.
+ * @param {boolean} [options.liveReload=true] - Whether to inject the dev live-reload client in dev builds.
+ * @returns {{name: string, setup: (api: Object) => void}} The Rsbuild plugin.
+ */
 export function pluginMithrilLynx(options = {}) {
 	const targetSdkVersion = options.targetSdkVersion ?? "3.5";
 	const liveReload = options.liveReload ?? true;
 
 	return {
 		name: PLUGIN_NAME,
+		/**
+		 * @param {Object} api - The Rsbuild plugin API.
+		 * @returns {void}
+		 * @throws {Error} If an entry has no sibling `background.ts`/`background.js`.
+		 */
 		setup(api) {
 			api.expose(Symbol.for("LynxTemplatePlugin"), { LynxTemplatePlugin });
 
@@ -240,6 +268,11 @@ export function pluginMithrilLynx(options = {}) {
 				chain.plugin("encode").use(LynxEncodePlugin, []);
 
 				chain.plugin("before-encode").use({
+					/**
+					 * Taps the template plugin's `beforeEncode` hook to attach the background and main-thread assets.
+					 * @param {Object} compiler - The bundler compiler.
+					 * @returns {void}
+					 */
 					apply(compiler) {
 						compiler.hooks.thisCompilation.tap(PLUGIN_NAME, (compilation) => {
 							const hooks = LynxTemplatePlugin.getLynxTemplatePluginHooks(compilation);

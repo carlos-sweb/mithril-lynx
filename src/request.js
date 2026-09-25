@@ -32,6 +32,12 @@ const UNSUPPORTED = [
 	["withCredentials", (o) => o.withCredentials === true],
 ];
 
+/**
+ * Throws if `options` uses an option Lynx's fetch cannot honor.
+ * @param {Object} options - The request options.
+ * @returns {void}
+ * @throws {Error} If an unsupported option (`config`, `async: false`, `user`, `password`, `withCredentials`) is present.
+ */
 function checkUnsupported(options) {
 	for (const [name, matches] of UNSUPPORTED) {
 		if (matches(options)) {
@@ -44,6 +50,12 @@ function checkUnsupported(options) {
 	}
 }
 
+/**
+ * Case-insensitive own-property check for a header name.
+ * @param {Object<string, string>} headers - The headers object.
+ * @param {string} name - The lowercase header name to look for.
+ * @returns {boolean}
+ */
 function hasHeader(headers, name) {
 	for (const key in headers) {
 		if (Object.prototype.hasOwnProperty.call(headers, key) && key.toLowerCase() === name) return true;
@@ -51,6 +63,12 @@ function hasHeader(headers, name) {
 	return false;
 }
 
+/**
+ * Wraps response data in `Type` instances, per item for arrays.
+ * @param {*} data - The response data.
+ * @param {Function} [Type] - A constructor; when not a function, `data` is returned unchanged.
+ * @returns {*} The wrapped data.
+ */
 function applyType(data, Type) {
 	if (typeof Type !== "function") return data;
 	if (Array.isArray(data)) return data.map((item) => new Type(item));
@@ -63,10 +81,18 @@ function applyType(data, Type) {
  *   so importing this file never requires `lynx` to already exist) —
  *   same pattern route.js uses for `renderApp`. Tests inject a fake here
  *   instead of hitting a real network.
+ * @returns {(url: string|Object, options?: Object) => Promise<*>} A `request` function shaped like `m.request`; its promise has an extra `abort()` method.
  */
 export function createRequestor(fetchImpl) {
 	const doFetch = fetchImpl || ((url, init) => lynx.fetch(url, init));
 
+	/**
+	 * Performs a request and redraws when it settles (unless `options.background` is `true`).
+	 * @param {string|Object} url - The URL, or an options object containing `url`.
+	 * @param {Object} [options] - `m.request`-style options (`method`, `params`, `body`, `headers`, `serialize`, `deserialize`, `extract`, `type`, `responseType`, `timeout`, `signal`, `background`).
+	 * @returns {Promise<*> & {abort: () => void}} Resolves with the (typed) response data; rejects with an `Error` carrying `code` and `response` for non-OK statuses.
+	 * @throws {Error} Synchronously, for unsupported options or a `FormData` body.
+	 */
 	return function request(url, options) {
 		if (typeof url !== "string") {
 			options = url;
@@ -115,6 +141,10 @@ export function createRequestor(fetchImpl) {
 		// Stored so the listener can be detached on settle (see detachSignal
 		// below) — a long-lived shared AbortSignal would otherwise accumulate
 		// one dead closure per request.
+		/**
+		 * Aborts the internal controller when the caller's signal aborts.
+		 * @returns {void}
+		 */
 		const abortHandler = () => ctrl.abort();
 		if (options.signal) {
 			if (options.signal.aborted) ctrl.abort();
@@ -127,6 +157,10 @@ export function createRequestor(fetchImpl) {
 				: setTimeout;
 			timeoutId = schedule(() => ctrl.abort(), options.timeout);
 		}
+		/**
+		 * Cancels the pending timeout, if any.
+		 * @returns {void}
+		 */
 		function clearRequestTimeout() {
 			if (timeoutId == null) return;
 			const clear = typeof lynx !== "undefined" && typeof lynx.clearTimeout === "function"
@@ -166,6 +200,10 @@ export function createRequestor(fetchImpl) {
 		// long-lived shared AbortSignal doesn't accumulate a dead closure per
 		// request. Done inside the settled handlers (rather than a separate
 		// `.then`) so an ignored rejection still surfaces as unhandled.
+		/**
+		 * Detaches the abort listener from the caller's signal.
+		 * @returns {void}
+		 */
 		const detachSignal = () => {
 			if (options.signal && !options.signal.aborted) {
 				options.signal.removeEventListener("abort", abortHandler);

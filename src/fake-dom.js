@@ -27,20 +27,41 @@
 
 const DASH_CASE = /-/;
 
+/**
+ * Converts a camelCase style property name to its dash-case CSS form.
+ * @param {string} name - The camelCase property name (e.g. `backgroundColor`).
+ * @returns {string} The dash-case name (e.g. `background-color`).
+ * @example
+ * camelToDash("backgroundColor"); // "background-color"
+ */
 function camelToDash(name) {
 	return name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 }
 
+/**
+ * Base class for every fake-DOM node: tracks the owning document and the parent link.
+ */
 class LynxNode {
+	/**
+	 * @param {LynxDocument|null} ownerDocument - The document that owns this node (`null` only for the document itself, which sets it afterwards).
+	 */
 	constructor(ownerDocument) {
 		this.ownerDocument = ownerDocument;
 		this._parent = null;
 	}
 
+	/**
+	 * The parent container, or `null` when detached.
+	 * @returns {LynxContainerNode|null}
+	 */
 	get parentNode() {
 		return this._parent;
 	}
 
+	/**
+	 * The sibling immediately after this node in its parent's child list.
+	 * @returns {LynxNode|null} The next sibling, or `null` when detached or last.
+	 */
 	get nextSibling() {
 		if (!this._parent) return null;
 		const siblings = this._parent._children;
@@ -55,12 +76,22 @@ class LynxNode {
 // for fragments (CONTRACT.md §c, `createDocumentFragment`): inserting a
 // fragment moves ITS children into the target and leaves the fragment
 // empty, rather than inserting the fragment node itself.
+/**
+ * Base class for nodes that can hold children (elements, fragments, the document).
+ */
 class LynxContainerNode extends LynxNode {
+	/**
+	 * @param {LynxDocument|null} ownerDocument - The document that owns this node.
+	 */
 	constructor(ownerDocument) {
 		super(ownerDocument);
 		this._children = [];
 	}
 
+	/**
+	 * The first child node.
+	 * @returns {LynxNode|null} The first child, or `null` when empty.
+	 */
 	get firstChild() {
 		return this._children[0] ?? null;
 	}
@@ -70,10 +101,19 @@ class LynxContainerNode extends LynxNode {
 	// `createDocumentFragment()` (createNodes' fragment-batching path) — a
 	// real DOM's `childNodes` is a live NodeList, but render.js only ever
 	// reads `.length` off it here, so the plain backing array is enough.
+	/**
+	 * The live backing array of child nodes (only `.length` is ever read by render.js).
+	 * @returns {LynxNode[]}
+	 */
 	get childNodes() {
 		return this._children;
 	}
 
+	/**
+	 * Tests whether `other` is this node or one of its descendants.
+	 * @param {LynxNode|null} other - The node to look for.
+	 * @returns {boolean} `true` when `other` is this node or a descendant of it.
+	 */
 	contains(other) {
 		let node = other;
 		while (node) {
@@ -83,11 +123,23 @@ class LynxContainerNode extends LynxNode {
 		return false;
 	}
 
+	/**
+	 * Appends a child at the end of this container.
+	 * @param {LynxNode} child - The node to append.
+	 * @returns {LynxNode} The appended node.
+	 */
 	appendChild(child) {
 		this.insertBefore(child, null);
 		return child;
 	}
 
+	/**
+	 * Inserts a child before a reference node, moving it from any previous parent.
+	 * A fragment is never attached itself: its children are moved in and it is left empty.
+	 * @param {LynxNode} child - The node to insert.
+	 * @param {LynxNode|null} refChild - The node to insert before, or `null` to append.
+	 * @returns {LynxNode} The inserted node.
+	 */
 	insertBefore(child, refChild) {
 		if (child instanceof LynxFragment) {
 			// Real DOM semantics: the fragment itself is never attached —
@@ -112,6 +164,11 @@ class LynxContainerNode extends LynxNode {
 		return child;
 	}
 
+	/**
+	 * Removes a child from this container.
+	 * @param {LynxNode} child - The node to remove.
+	 * @returns {LynxNode} The removed node.
+	 */
 	removeChild(child) {
 		this._removeChildBookkeeping(child);
 		if (this._id != null && child._id != null) {
@@ -120,6 +177,11 @@ class LynxContainerNode extends LynxNode {
 		return child;
 	}
 
+	/**
+	 * Detaches `child` from the local child list and clears its parent link, without touching the backend.
+	 * @param {LynxNode} child - The child to detach.
+	 * @returns {void}
+	 */
 	_removeChildBookkeeping(child) {
 		const index = this._children.indexOf(child);
 		if (index !== -1) this._children.splice(index, 1);
@@ -127,20 +189,48 @@ class LynxContainerNode extends LynxNode {
 	}
 }
 
+/**
+ * Creates the `element.style` object: a proxy that forwards `setProperty`/`removeProperty`
+ * and camelCase or dash-case property assignments to the backend as dash-case ops.
+ * @param {LynxElement} element - The element the style object belongs to.
+ * @returns {CSSStyleDeclaration} A proxy that emulates the subset of `CSSStyleDeclaration` render.js uses.
+ */
 function createStyleProxy(element) {
 	const methods = {
+		/**
+		 * @param {string} name - Dash-case style property name.
+		 * @param {*} value - Value, coerced with `String()`.
+		 * @returns {void}
+		 */
 		setProperty(name, value) {
 			element._styleEverSet = true;
 			element._backend.setStyleProperty(element._id, name, String(value));
 		},
+		/**
+		 * @param {string} name - Dash-case style property name.
+		 * @returns {void}
+		 */
 		removeProperty(name) {
 			element._backend.removeStyleProperty(element._id, name);
 		},
 	};
 	return new Proxy(methods, {
+		/**
+		 * Proxy trap: reads pass through to the `setProperty`/`removeProperty` methods.
+		 * @param {Object} target - The methods object.
+		 * @param {string|symbol} prop - The property being read.
+		 * @returns {*} The property value.
+		 */
 		get(target, prop) {
 			return target[prop];
 		},
+		/**
+		 * Proxy trap: assigning a property writes (or, for an empty value, removes) that style property.
+		 * @param {Object} _target - Unused.
+		 * @param {string|symbol} prop - The style property name (camelCase or dash-case); symbols are ignored.
+		 * @param {*} value - The new value; `""`, `null` or `undefined` removes the property.
+		 * @returns {boolean} Always `true`.
+		 */
 		set(_target, prop, value) {
 			if (typeof prop !== "string") return true;
 			// Direct camelCase assignment path (CONTRACT.md §f, line 764/781).
@@ -164,6 +254,9 @@ function createStyleProxy(element) {
 // on the main thread — a single incrementing counter is simplest).
 let nextGestureId = 1;
 
+/**
+ * A fake-DOM element that mirrors every mutation to the backend as a patch op.
+ */
 export class LynxElement extends LynxContainerNode {
 	/**
 	 * `listConfig`, when given, makes this a native virtualized list
@@ -194,11 +287,20 @@ export class LynxElement extends LynxContainerNode {
 		this.selectedIndex = undefined;
 	}
 
+	/**
+	 * Lazily created style object for this element.
+	 * @returns {CSSStyleDeclaration}
+	 */
 	get style() {
 		if (!this._style) this._style = createStyleProxy(this);
 		return this._style;
 	}
 
+	/**
+	 * Replaces the element's style. `""`/`null` clears it, an object assigns each key,
+	 * and a CSS text string is unsupported (a warning is logged).
+	 * @param {Object|string|null} value - The new style.
+	 */
 	set style(value) {
 		if (value == null || value === "") {
 			// `element.style = ""` (CONTRACT.md §f, lines 750-752): clear.
@@ -238,10 +340,18 @@ export class LynxElement extends LynxContainerNode {
 		}
 	}
 
+	/**
+	 * The element's class string.
+	 * @returns {string} The class string, or `""` when unset.
+	 */
 	get className() {
 		return this._className ?? "";
 	}
 
+	/**
+	 * Sets the element's classes, emitting a `class` attribute op.
+	 * @param {string|null|undefined} value - The class string; `null`/`undefined` clears it.
+	 */
 	set className(value) {
 		// Mithril's `setAttr`/`removeAttr` map `className` -> the `"class"`
 		// attribute (CONTRACT.md §e); routed here directly since `className`
@@ -251,6 +361,12 @@ export class LynxElement extends LynxContainerNode {
 		this._backend.setClasses(this._id, value == null ? "" : String(value));
 	}
 
+	/**
+	 * Sets an attribute; the `class` name is routed to `className`.
+	 * @param {string} name - Attribute name.
+	 * @param {*} value - Attribute value, coerced with `String()`; `null`/`undefined` is sent as `null`.
+	 * @returns {void}
+	 */
 	setAttribute(name, value) {
 		if (name === "class") {
 			this.className = value;
@@ -259,6 +375,11 @@ export class LynxElement extends LynxContainerNode {
 		this._backend.setAttribute(this._id, name, value == null ? null : String(value));
 	}
 
+	/**
+	 * Removes an attribute; removing `class` clears the class string.
+	 * @param {string} name - Attribute name.
+	 * @returns {void}
+	 */
 	removeAttribute(name) {
 		if (name === "class") {
 			this.className = "";
@@ -267,6 +388,13 @@ export class LynxElement extends LynxContainerNode {
 		this._backend.removeAttribute(this._id, name);
 	}
 
+	/**
+	 * Sets a namespaced attribute.
+	 * @param {string|null} ns - Attribute namespace.
+	 * @param {string} name - Attribute name.
+	 * @param {*} value - Attribute value, coerced with `String()`; `null`/`undefined` is sent as `null`.
+	 * @returns {void}
+	 */
 	setAttributeNS(ns, name, value) {
 		this._backend.setAttributeNS(this._id, ns, name, value == null ? null : String(value));
 	}
@@ -287,6 +415,11 @@ export class LynxElement extends LynxContainerNode {
 		return gestureId;
 	}
 
+	/**
+	 * Removes a gesture detector previously registered with `setGestureDetector()`.
+	 * @param {number} gestureId - The id returned by `setGestureDetector()`.
+	 * @returns {void}
+	 */
 	removeGestureDetector(gestureId) {
 		this._backend.removeGestureDetector(this._id, gestureId);
 	}
@@ -296,12 +429,24 @@ export class LynxElement extends LynxContainerNode {
 		this._backend.setListItems(this._id, items);
 	}
 
+	/**
+	 * Registers the single listener for an event type; the backend is told only the first time.
+	 * Replaces any previous listener for the same type.
+	 * @param {string} type - Event type (e.g. `tap`).
+	 * @param {Function|{handleEvent: Function}} listener - A function or an EventListener object.
+	 * @returns {void}
+	 */
 	addEventListener(type, listener) {
 		const isNew = !(type in this._listeners);
 		this._listeners[type] = listener;
 		if (isNew) this._backend.addEvent(this._id, type);
 	}
 
+	/**
+	 * Removes the listener for an event type, if any.
+	 * @param {string} type - Event type.
+	 * @returns {void}
+	 */
 	removeEventListener(type) {
 		if (!(type in this._listeners)) return;
 		delete this._listeners[type];
@@ -321,6 +466,10 @@ export class LynxElement extends LynxContainerNode {
 		else if (typeof listener.handleEvent === "function") listener.handleEvent(event);
 	}
 
+	/**
+	 * Only `""` is supported: removes every child. Any other value logs a warning and is ignored.
+	 * @param {string} value - Must be the empty string.
+	 */
 	set textContent(value) {
 		// render.js only ever does `dom.textContent = ""` (first-render
 		// clear, CONTRACT.md §b line 898) — implemented as "remove every
@@ -335,6 +484,10 @@ export class LynxElement extends LynxContainerNode {
 		for (const child of this._children.slice()) this.removeChild(child);
 	}
 
+	/**
+	 * Unsupported on Lynx elements; logs a warning.
+	 * @param {string} _value - Ignored.
+	 */
 	set innerHTML(_value) {
 		// `m.trust()`/contenteditable sync (CONTRACT.md §c) — Lynx elements
 		// have no HTML-string target to parse into. Documented as
@@ -347,6 +500,10 @@ export class LynxElement extends LynxContainerNode {
 		}
 	}
 
+	/**
+	 * No-op by design: focus is managed by the native platform.
+	 * @returns {void}
+	 */
 	focus() {
 		// Native `<input>` focus on Lynx is managed by the platform, not by
 		// a JS `.focus()` call reaching into the render pipeline — calling
@@ -357,7 +514,15 @@ export class LynxElement extends LynxContainerNode {
 	}
 }
 
+/**
+ * A fake-DOM text node backed by a native text element.
+ */
 export class LynxText extends LynxNode {
+	/**
+	 * @param {LynxDocument} ownerDocument - The owning document.
+	 * @param {Object} backend - The patch backend used to create and update the text.
+	 * @param {string} text - The initial text.
+	 */
 	constructor(ownerDocument, backend, text) {
 		super(ownerDocument);
 		this._backend = backend;
@@ -371,10 +536,18 @@ export class LynxText extends LynxNode {
 		this._id = backend.createText(text);
 	}
 
+	/**
+	 * The node's text.
+	 * @returns {string}
+	 */
 	get nodeValue() {
 		return this._text;
 	}
 
+	/**
+	 * Updates the text and emits a set-text op.
+	 * @param {string} value - The new text.
+	 */
 	set nodeValue(value) {
 		this._text = value;
 		this._backend.setText(this._id, value);
@@ -387,9 +560,18 @@ export class LynxText extends LynxNode {
 // (this._id != null && child._id != null)` guards in insertBefore/
 // removeChild are what keep a fragment-as-parent from ever trying to call
 // the backend for itself.
+/**
+ * A document fragment: never gets a backend id; its children are moved into the target on insertion.
+ */
 export class LynxFragment extends LynxContainerNode {}
 
+/**
+ * The fake document handed to Mithril's render.js; id `0` is the real page container.
+ */
 export class LynxDocument extends LynxContainerNode {
+	/**
+	 * @param {Object} backend - The patch backend that records ops (see `createVirtualBackend()`).
+	 */
 	constructor(backend) {
 		super(null);
 		this._backend = backend;
@@ -407,33 +589,66 @@ export class LynxDocument extends LynxContainerNode {
 		this._nodesById = new Map();
 	}
 
+	/**
+	 * Looks up a node by backend id, used to route forwarded native events.
+	 * @param {number} id - The backend id.
+	 * @returns {LynxElement|LynxText|LynxDocument|null} The node, or `null` when unknown.
+	 */
 	getNodeById(id) {
 		return this._nodesById.get(id) ?? null;
 	}
 
+	/**
+	 * No-op; present so render.js's focus-restoration check never throws.
+	 * @returns {void}
+	 */
 	focus() {
 		// Never meaningfully called on the document root itself; present so
 		// render.js's post-render focus-restoration check (CONTRACT.md §b)
 		// never throws if `activeElement` happens to resolve to the root.
 	}
 
+	/**
+	 * Only `""` is honored: removes every child of the document root.
+	 * @param {string} value - Must be the empty string for any effect.
+	 */
 	set textContent(value) {
 		if (value !== "") return;
 		for (const child of this._children.slice()) this.removeChild(child);
 	}
 
+	/**
+	 * Creates an element.
+	 * @param {string} tag - The tag name.
+	 * @returns {LynxElement}
+	 */
 	createElement(tag) {
 		return new LynxElement(this, this._backend, tag, undefined);
 	}
 
+	/**
+	 * Creates a namespaced element.
+	 * @param {string} ns - The namespace URI.
+	 * @param {string} tag - The tag name.
+	 * @returns {LynxElement}
+	 */
 	createElementNS(ns, tag) {
 		return new LynxElement(this, this._backend, tag, ns);
 	}
 
+	/**
+	 * Creates a text node.
+	 * @param {string} text - The initial text.
+	 * @returns {LynxText}
+	 */
 	createTextNode(text) {
 		return new LynxText(this, this._backend, text);
 	}
 
+	/**
+	 * Creates an empty document fragment.
+	 * @returns {LynxFragment}
+	 */
 	createDocumentFragment() {
 		return new LynxFragment(this);
 	}
@@ -443,6 +658,12 @@ export class LynxDocument extends LynxContainerNode {
 	 * Populate it via `.setListItems(cells)` (list-cell.js builds `cells`
 	 * from an app's own `items`/`renderItem`) — see
 	 * docs/native-papi/papi-06-virtualized-lists.md in mithril-lynx-ui.
+	 *
+	 * @param {Object} [options] - List configuration.
+	 * @param {string} [options.scrollOrientation="vertical"] - Scroll direction.
+	 * @param {string} [options.listType="single"] - Native list layout type.
+	 * @param {number} [options.spanCount=1] - Number of columns/spans.
+	 * @returns {LynxElement} A native list element.
 	 */
 	createNativeList(options = {}) {
 		return new LynxElement(this, this._backend, "list", undefined, {
@@ -455,12 +676,20 @@ export class LynxDocument extends LynxContainerNode {
 	/** Delegates to the backend — see virtual-backend.js's own captureOps
 	 * for what this is for. Kept behind LynxDocument's public surface like
 	 * every other backend interaction in this file, rather than exposing
-	 * `_backend` itself to callers (list-cell.js). */
+	 * `_backend` itself to callers (list-cell.js).
+	 * @param {() => void} fn - The DOM mutation to run.
+	 * @returns {unknown[]} The ops produced by `fn`, removed from the shared buffer.
+	 */
 	captureOps(fn) {
 		return this._backend.captureOps(fn);
 	}
 }
 
+/**
+ * Creates a fake document bound to a patch backend.
+ * @param {Object} backend - The patch backend (see `createVirtualBackend()`).
+ * @returns {LynxDocument}
+ */
 export function createLynxDocument(backend) {
 	return new LynxDocument(backend);
 }

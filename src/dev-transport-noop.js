@@ -7,4 +7,7 @@
 // (order "post", so it wins over the alias @lynx-js/rsbuild-plugin
 // registers) so `module.hot` stays live without a competing channel. Same
 // fix as mithril-lynx v1's F2 (src/dev-transport-noop.js).
+/**
+ * No-op replacement for the official dev transport client.
+ */
 export default class DevTransportClientNoop {}

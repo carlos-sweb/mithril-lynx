@@ -28,22 +28,35 @@ import { PROTOCOL_VERSION } from "./patch-protocol.js";
  * The patch is prefixed with `PROTOCOL_VERSION` so the main thread can
  * detect a stale/desynced bundle (partial HMR, cache) and fail loudly
  * instead of re-interpreting reordered opcodes against the shared id space.
+ * @param {unknown[]} ops - The flat op array for one commit.
+ * @returns {void}
  */
 export function sendPatchToMainThread(ops) {
 	lynx.getCoreContext().dispatchEvent({ type: patchEventName, data: [PROTOCOL_VERSION, ...ops] });
 }
 
-/** Background thread: receive a forwarded native event `{ id, type, payload }`. */
+/** Background thread: receive a forwarded native event `{ id, type, payload }`.
+ * @param {(event: {data: {id: number, type: string, payload: unknown}}) => void} handler - Called for every forwarded event.
+ * @returns {void}
+ */
 export function onEventFromMainThread(handler) {
 	lynx.getCoreContext().addEventListener(eventFromMainThreadEventName, handler);
 }
 
-/** Main thread: receive a patch (an ops array) from the background thread. */
+/** Main thread: receive a patch (an ops array) from the background thread.
+ * @param {(event: {data: unknown}) => void} handler - Called with each version-prefixed patch.
+ * @returns {void}
+ */
 export function onPatchFromBackground(handler) {
 	lynx.getJSContext().addEventListener(patchEventName, handler);
 }
 
-/** Main thread: forward a native event on element `id` back to the background thread. */
+/** Main thread: forward a native event on element `id` back to the background thread.
+ * @param {number} id - The element id.
+ * @param {string} type - The event type.
+ * @param {unknown} payload - The native event payload.
+ * @returns {void}
+ */
 export function sendEventToBackground(id, type, payload) {
 	lynx.getJSContext().dispatchEvent({ type: eventFromMainThreadEventName, data: { id, type, payload } });
 }

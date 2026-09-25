@@ -28,6 +28,11 @@
 
 var MRL = "[mrl-trace]";
 
+/**
+ * Parses a webpack `__resourceQuery` string into a key/value map.
+ * @param {string} query - The query string, beginning with `?`.
+ * @returns {Object<string, string>} The decoded values (empty when `query` is not a `?` string).
+ */
 function parseResourceQuery(query) {
 	var values = {};
 	if (typeof query !== "string" || !query.startsWith("?")) return values;
@@ -41,6 +46,11 @@ function parseResourceQuery(query) {
 	return values;
 }
 
+/**
+ * Builds the dev-server WebSocket URL.
+ * @param {{protocol?: string, hostname?: string, port?: string, pathname?: string, token?: string}} options - Connection settings parsed from the resource query.
+ * @returns {string} The `ws(s)://` URL.
+ */
 function socketURL(options) {
 	var hostname = options.hostname || "";
 	var port = options.port ? ":" + options.port : "";
@@ -53,6 +63,9 @@ function socketURL(options) {
  * Lynx keys both the HTTP layer and its bytecode cache by URL — a
  * `Page.reload` with the SAME url re-runs the previous bundle byte-for-byte
  * even with `ignoreCache: true` (measured on-device against v1, 0.0.8).
+ * @param {string} url - The bundle URL.
+ * @param {number} [now=Date.now()] - Timestamp used for the `t` parameter.
+ * @returns {string|undefined} The URL with a `t` parameter, or `undefined` when `url` is not an http(s) URL.
  */
 function cacheBustedUrl(url, now) {
 	if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return undefined;
@@ -94,6 +107,10 @@ var reloading = false;
 // against this hash once it settles.
 var pendingRecheckHash;
 
+/**
+ * Asks the DevTool native module to reload the page (`Page.reload`, cache ignored).
+ * @returns {boolean} `true` when the reload request was sent, `false` when the native module is unavailable.
+ */
 function invokeCdpReload() {
 	var upperCase = typeof NativeModules !== "undefined" ? NativeModules.LynxDevToolSetModule : undefined;
 	var lowerCase = typeof NativeModules !== "undefined" ? NativeModules.LynxDevtoolSetModule : undefined;
@@ -110,6 +127,10 @@ function invokeCdpReload() {
 
 	invokeCdp(
 		JSON.stringify({ method: "Page.reload", params }),
+		/**
+		 * @param {string} [data] - The raw CDP response; logged when it carries an error.
+		 * @returns {void}
+		 */
 		function (data) {
 			if (!data) return;
 			try {
@@ -123,6 +144,11 @@ function invokeCdpReload() {
 	return true;
 }
 
+/**
+ * Closes the socket and triggers a full page reload.
+ * @param {string} [reason] - Why the reload was requested (logged).
+ * @returns {void}
+ */
 function reload(reason) {
 	console.info(MRL + ":8 reload-called", JSON.stringify({ reason: reason || "unspecified" }));
 	reloading = true;
@@ -134,6 +160,11 @@ function reload(reason) {
 	}
 }
 
+/**
+ * Runs `module.hot.check(true)`, coalescing a queued newer hash or falling back to a full reload.
+ * @param {string} hash - The build hash being checked.
+ * @returns {void}
+ */
 function runCheck(hash) {
 	console.info(MRL + ":5 hmr-check-calling", "module.hot.check(true)");
 	module.hot.check(true).then(function (updatedModules) {
@@ -165,6 +196,11 @@ function runCheck(hash) {
 	});
 }
 
+/**
+ * Starts an HMR check for `hash`, queues it if another check is in flight, or reloads when HMR is unavailable.
+ * @param {string} hash - The build hash to check.
+ * @returns {void}
+ */
 function maybeCheck(hash) {
 	var hasHot = typeof module !== "undefined" && module.hot;
 	var hotStatus = hasHot ? module.hot.status() : "n/a";
@@ -186,6 +222,11 @@ function maybeCheck(hash) {
 	runCheck(hash);
 }
 
+/**
+ * Handles one dev-server message (`hash`, `ok`, `warnings`, `errors`).
+ * @param {string} rawMessage - The raw JSON message text; invalid JSON is ignored with a warning.
+ * @returns {void}
+ */
 function handleMessage(rawMessage) {
 	var message;
 	try {
@@ -224,6 +265,11 @@ function handleMessage(rawMessage) {
 	}
 }
 
+/**
+ * Opens the dev-server WebSocket and reconnects with exponential backoff (up to 10 retries).
+ * @param {number} [retries=0] - The number of reconnect attempts made so far.
+ * @returns {void}
+ */
 function connect(retries) {
 	if (retries === undefined) retries = 0;
 	console.info(MRL + ":1 ws-connecting", JSON.stringify({ url: socketURL(options), retry: retries }));

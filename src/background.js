@@ -29,6 +29,7 @@ import { register as registerRedraw } from "./mount-redraw.js";
  *   worth of ops across the thread boundary. Defaults to the real channel
  *   (channel.js, F0.1's decision) — tests override it to capture ops
  *   in-process instead.
+ * @returns {{redraw: () => void, document: import("./fake-dom.js").LynxDocument}} The redraw function and the app's fake document.
  */
 export function renderApp({ root, sendPatch = sendPatchToMainThread }) {
 	const backend = createVirtualBackend();
@@ -36,6 +37,10 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread }) {
 	const render = renderFactory();
 	const commitController = createCommitController();
 
+	/**
+	 * Drains the backend's ops and sends them, if there are any.
+	 * @returns {void}
+	 */
 	function flush() {
 		const ops = backend.takeOps();
 		if (ops) sendPatch(ops);
@@ -48,6 +53,10 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread }) {
 	// directly — flushing is a side effect of every render pass completing,
 	// whether that pass was the first one, an auto-redraw after an event, a
 	// manual `redraw()` call, or a hot-update re-render (see reload/*.js).
+	/**
+	 * Runs one full render pass and commits the resulting patch; also serves as Mithril's redraw callback.
+	 * @returns {void}
+	 */
 	function performRender() {
 		render(document, root(), performRender);
 		commitController.commit();

@@ -15,6 +15,11 @@
 
 import { Op, forEachOp } from "./patch-protocol.js";
 
+/**
+ * Derives the recycling type key for a cell's root vnode.
+ * @param {{tag?: string|{name?: string}}} vnode - The cell's root vnode.
+ * @returns {string} The tag (or component name), or `"default"`.
+ */
 function typeKeyOf(vnode) {
 	return typeof vnode.tag === "string" ? vnode.tag : (vnode.tag && vnode.tag.name) || "default";
 }
@@ -24,7 +29,11 @@ function typeKeyOf(vnode) {
  * different item's content into the same native wrapper (see
  * list-support.js's clearWrapperChildren). Scanning the ops after the fact,
  * instead of tracking during render, keeps this file from needing any
- * backend-internal access beyond `captureOps` itself. */
+ * backend-internal access beyond `captureOps` itself.
+ * @param {unknown[]} ops - The flat ops captured while rendering the cell.
+ * @param {number} containerId - The cell's container id.
+ * @returns {number[]} The ids of the children inserted directly under `containerId`.
+ */
 function findTopLevelChildIds(ops, containerId) {
 	const ids = [];
 	forEachOp(ops, (opcode, args) => {

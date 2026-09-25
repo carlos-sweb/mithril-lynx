@@ -61,6 +61,8 @@ let redrawDelayMs = REDRAW_DELAY_MS;
  * which is a safety margin rather than a scheduling guarantee. A device whose
  * timer behaves differently (see FETCH_INVESTIGATION.md §4.6) can raise or
  * lower it here.
+ * @param {{redrawDelayMs?: number}} [options] - Settings; `redrawDelayMs` overrides the debounce delay.
+ * @returns {void}
  */
 export function configure(options) {
 	if (options && options.redrawDelayMs != null) {
@@ -68,6 +70,11 @@ export function configure(options) {
 	}
 }
 
+/**
+ * Schedules a callback after the redraw delay, preferring `lynx.setTimeout`.
+ * @param {() => void} fn - The callback to run.
+ * @returns {*} The timer handle.
+ */
 function schedule(fn) {
 	const timer = typeof lynx !== "undefined" && typeof lynx.setTimeout === "function" ? lynx.setTimeout.bind(lynx) : setTimeout;
 	return timer(fn, redrawDelayMs);
@@ -80,6 +87,9 @@ function schedule(fn) {
  * documents corrupt the shared id space (see R2 in
  * informe-contrato-mithril-lynx.md). Call {@link unregister} on teardown
  * or full reload before registering a new one.
+ * @param {() => void} redraw - The app's redraw function.
+ * @returns {void}
+ * @throws {Error} If a redraw is already registered.
  */
 export function register(redraw) {
 	if (currentRedraw != null) {
@@ -97,6 +107,7 @@ export function register(redraw) {
  * Clears the current redraw registration (and the pending debounce flag) —
  * used by a full reload and by the test suite between mounts. After this,
  * `redraw()` is a no-op again until the next `register()`.
+ * @returns {void}
  */
 export function unregister() {
 	currentRedraw = null;
@@ -115,7 +126,9 @@ export function unregister() {
  * renderApp()/route() ran has nothing to redraw yet, which isn't
  * necessarily a bug the way calling commit() before mounting is. Multiple
  * calls within the delay window collapse into a single scheduled render,
- * same debounce real Mithril's `redraw()` does with its `pending` flag. */
+ * same debounce real Mithril's `redraw()` does with its `pending` flag.
+ * @returns {void}
+ */
 export function redraw() {
 	if (pending) return;
 	pending = true;

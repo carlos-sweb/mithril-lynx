@@ -24,6 +24,10 @@ import parsePathname from "mithril-runtime/pathname/parse.js";
 import compileTemplate from "mithril-runtime/pathname/compileTemplate.js";
 import { renderApp } from "./background.js";
 
+/**
+ * Creates an in-memory router with the `m.route` API.
+ * @returns {Function & {SKIP: Object, set: Function, get: Function, param: Function, prefix: string, back: Function, forward: Function, Link: Object}} The `route` function.
+ */
 export function createRoute() {
 	var compiled, fallbackRoute;
 	var component, attrs, currentPath, currentResolver;
@@ -41,22 +45,43 @@ export function createRoute() {
 	var historyIndex = -1;
 
 	var RouterRoot = {
+		/**
+		 * Renders the current route's component, through its resolver's `render` when present.
+		 * @returns {*} The vnode to render.
+		 */
 		view() {
 			var vnode = component != null ? m(component, attrs) : null;
 			return currentResolver ? currentResolver.render(vnode) : vnode;
 		},
 	};
 
+	/**
+	 * Finds the route matching `path` and renders it, starting the app on the first resolution.
+	 * @param {string} path - The path to resolve.
+	 * @param {Object|null} data - Extra params merged into the parsed params.
+	 * @returns {void}
+	 * @throws {Error} If the default route cannot be resolved.
+	 */
 	function resolveRoute(path, data) {
 		var parsed = parsePathname(path);
 		if (data) Object.assign(parsed.params, data);
 
+		/**
+		 * Logs a failed `onmatch` and navigates to the default route.
+		 * @param {*} e - The error to log.
+		 * @returns {void}
+		 */
 		function reject(e) {
 			if (typeof console !== "undefined") console.error(e);
 			route.set(fallbackRoute, null, { replace: true });
 		}
 
 		loop(0);
+		/**
+		 * Tries each compiled route from `i` onward.
+		 * @param {number} i - The index to start from.
+		 * @returns {void}
+		 */
 		function loop(i) {
 			for (; i < compiled.length; i++) {
 				if (compiled[i].check(parsed)) {
@@ -105,6 +130,9 @@ export function createRoute() {
 	 *   `initialEntries={["/"]}`).
 	 * @param {Record<string, unknown>} routes - Same shape as real
 	 *   `m.route`: `{ "/path/:param": Component | { onmatch, render } }`.
+	 * @returns {void}
+	 * @throws {SyntaxError} If a route does not start with `/`.
+	 * @throws {ReferenceError} If the default route matches no known route.
 	 */
 	function route(defaultRoute, routes) {
 		compiled = Object.keys(routes).map((r) => {
@@ -134,6 +162,14 @@ export function createRoute() {
 
 	route.SKIP = {};
 
+	/**
+	 * Navigates to a path, pushing (or, with `replace`, overwriting) a history entry.
+	 * @param {string} path - The path or template to navigate to.
+	 * @param {Object|null} [data] - Params to fill the path template with.
+	 * @param {{replace?: boolean}} [options] - Navigation options.
+	 * @returns {void}
+	 * @throws {Error} If called before `route(defaultRoute, routes)`.
+	 */
 	route.set = function (path, data, options) {
 		if (!ready) {
 			throw new Error(
@@ -158,8 +194,15 @@ export function createRoute() {
 		if (ready) resolveRoute(path, null);
 	};
 
+	/**
+	 * @returns {string|undefined} The current path, or `undefined` before the first resolution.
+	 */
 	route.get = () => currentPath;
 
+	/**
+	 * @param {string} [key] - A param name.
+	 * @returns {*} That param's value, or all params when `key` is omitted.
+	 */
 	route.param = (key) => (attrs && key != null ? attrs[key] : attrs);
 
 	// No URL bar in Lynx — kept as an assignable no-op so app code ported
@@ -176,6 +219,7 @@ export function createRoute() {
 	 * back affordance (a `route.Link`/button calling this) is the only
 	 * way back navigation happens. Confirming this holds on a real device
 	 * is F4/F5 of the plan, not done yet.
+	 * @returns {boolean} `true` when the history moved back, `false` when already at the start.
 	 */
 	route.back = function () {
 		if (historyIndex <= 0) return false;
@@ -183,6 +227,10 @@ export function createRoute() {
 		resolveRoute(history[historyIndex], null);
 		return true;
 	};
+	/**
+	 * Moves one entry forward in the in-memory history.
+	 * @returns {boolean} `true` when the history moved forward, `false` when already at the end.
+	 */
 	route.forward = function () {
 		if (historyIndex >= history.length - 1) return false;
 		historyIndex++;
@@ -194,6 +242,11 @@ export function createRoute() {
 	// instead, the same shape ReactLynx's `useNavigate()+ontap` and Vue
 	// Lynx's custom `RouterLink` slot use (plan §1–§2, §5.4).
 	route.Link = {
+		/**
+		 * Renders a tap-driven element that navigates to `href`.
+		 * @param {{attrs: {href: string, params?: Object, options?: Object, selector?: string, disabled?: boolean, ontap?: Function}, children: *}} vnode - The Mithril vnode.
+		 * @returns {*} The rendered vnode.
+		 */
 		view(vnode) {
 			var a = vnode.attrs;
 			var selector = a.selector || "view";

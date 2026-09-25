@@ -32,6 +32,7 @@ Object.assign(globalThis, {
  * finish before or after that fires — patches arriving early are buffered
  * and replayed in order once the page exists), then wires the patch/event
  * channel for the lifetime of the page.
+ * @returns {void}
  */
 export function setupRenderer() {
 	const engine = lynx.getEngine();
@@ -39,6 +40,12 @@ export function setupRenderer() {
 	let pageReady = false;
 	let pendingPatches = [];
 
+	/**
+	 * Receives a patch, validating its protocol version and buffering it until the page exists.
+	 * @param {{data: unknown}} event - The patch event.
+	 * @returns {void}
+	 * @throws {Error} On a protocol version mismatch.
+	 */
 	const onPatch = (event) => {
 		const data = event.data;
 		if (!Array.isArray(data) || data[0] !== PROTOCOL_VERSION) {
@@ -60,6 +67,10 @@ export function setupRenderer() {
 	};
 	onPatchFromBackground(onPatch);
 
+	/**
+	 * Creates the real page and applier, then flushes any buffered patches.
+	 * @returns {void}
+	 */
 	const onRenderPage = () => {
 		const page = __CreatePage("0", 0);
 		const pageId = __GetElementUniqueID(page);
@@ -73,6 +84,10 @@ export function setupRenderer() {
 	};
 	engine.addEventListener(renderPageEventName, onRenderPage);
 
+	/**
+	 * Removes the page lifecycle listeners.
+	 * @returns {void}
+	 */
 	const onDestroyLifetime = () => {
 		engine.removeEventListener(renderPageEventName, onRenderPage);
 		engine.removeEventListener(destroyLifetimeEventName, onDestroyLifetime);

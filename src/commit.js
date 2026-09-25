@@ -20,6 +20,10 @@
 
 const NOT_MOUNTED = Symbol("mithril-lynx:not-mounted");
 
+/**
+ * Creates the single-use commit controller for one `renderApp()` call.
+ * @returns {{install: (fn: () => void) => void, commit: () => void}} The controller.
+ */
 export function createCommitController() {
 	let commitFn = NOT_MOUNTED;
 
@@ -29,6 +33,9 @@ export function createCommitController() {
 		 * `renderApp()` (background.js), before Mithril's `render()` is ever
 		 * invoked — so nothing can observe the "not mounted yet" state from
 		 * inside a redraw.
+		 * @param {() => void} fn - The commit callback.
+		 * @returns {void}
+		 * @throws {Error} If a commit callback was already installed.
 		 */
 		install(fn) {
 			if (commitFn !== NOT_MOUNTED) {
@@ -51,6 +58,8 @@ export function createCommitController() {
 		 * after any event handler runs, with no cooperation required from
 		 * app code — that automatic call is what makes redraw "just work"
 		 * like it does in React/Preact.
+		 * @returns {void}
+		 * @throws {Error} If called before a commit callback was installed.
 		 */
 		commit() {
 			if (commitFn === NOT_MOUNTED) {

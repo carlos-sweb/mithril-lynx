@@ -26,12 +26,28 @@
 // background thread (where the diff would have to run) can't see without a
 // round trip. Not implemented.
 
+/**
+ * Creates a native virtualized list on the main thread and wires its cell callbacks.
+ * @param {number} pageId - The page's unique id.
+ * @param {string} scrollOrientation - Scroll direction.
+ * @param {string} listType - Native list layout type.
+ * @param {number} spanCount - Number of columns/spans.
+ * @param {Function} createPatchApplier - Factory for a per-cell patch applier (see apply-patch.js).
+ * @param {(id: number, type: string, payload: unknown) => void} [onEvent] - Receives native events from cell content.
+ * @returns {{handle: *, setCells: (nextCells: Array<{typeKey: string, containerId: number, ops: unknown[], rootChildIds: number[]}>) => void}} The list handle and the function that replaces its cells.
+ */
 export function createNativeList(pageId, scrollOrientation, listType, spanCount, createPatchApplier, onEvent) {
 	let cells = []; // current cells, indexed by cellIndex — see patch-protocol.js's Op.SetListItems
 	let count = 0;
 	const signMap = new Map(); // sign -> { wrapperHandle, applier, rootChildIds, cellIndex, typeKey }
 	const recycleMap = new Map(); // typeKey -> Map<sign, entry> (entries currently off-screen, available to reuse)
 
+	/**
+	 * Replays a cell's ops into a native wrapper element.
+	 * @param {*} wrapperHandle - The native wrapper element.
+	 * @param {{containerId: number, ops: unknown[]}} cell - The cell descriptor.
+	 * @returns {{applyPatch: Function, getHandle: Function}} The applier used, kept to resolve child handles later.
+	 */
 	function replayCell(wrapperHandle, cell) {
 		const applier = createPatchApplier(pageId, { onEvent, flush: false });
 		applier.registerRoot(cell.containerId, wrapperHandle);
@@ -39,6 +55,11 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return applier;
 	}
 
+	/**
+	 * Removes a cell's previously inserted top-level children from its wrapper.
+	 * @param {{wrapperHandle: *, applier: {getHandle: Function}, rootChildIds: number[]}} entry - The attached cell entry.
+	 * @returns {void}
+	 */
 	function clearWrapperChildren(entry) {
 		for (const id of entry.rootChildIds) {
 			const handle = entry.applier.getHandle(id);
@@ -56,7 +77,10 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 	 * hardware via a scrambled child order after scrolling (item-keys
 	 * 7,8,9,3,4,5,6). Same problem `@lynx-js/react`'s own
 	 * `attachListItemAtIndex`/`findNextAttachedItem` solves for its
-	 * Element Template list. */
+	 * Element Template list.
+	 * @param {number} cellIndex - The index of the cell being positioned.
+	 * @returns {*} The wrapper handle of the next attached cell, or `null`.
+	 */
 	function findNextAttachedWrapper(cellIndex) {
 		let best = null;
 		for (const entry of signMap.values()) {
@@ -65,12 +89,29 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return best ? best.wrapperHandle : null;
 	}
 
+	/**
+	 * Inserts a cell wrapper into the list at its correct tree position.
+	 * @param {*} listHandle - The native list element.
+	 * @param {*} wrapperHandle - The cell wrapper to insert.
+	 * @param {number} cellIndex - The cell's index.
+	 * @returns {void}
+	 */
 	function attachWrapper(listHandle, wrapperHandle, cellIndex) {
 		const refHandle = findNextAttachedWrapper(cellIndex);
 		if (refHandle != null) __InsertElementBefore(listHandle, wrapperHandle, refHandle);
 		else __AppendElement(listHandle, wrapperHandle);
 	}
 
+	/**
+	 * Creates a new wrapper for a cell and replays its ops.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {number} cellIndex - The cell's index.
+	 * @param {number} opId - Native operation id for the flush.
+	 * @param {{typeKey: string, containerId: number, ops: unknown[], rootChildIds: number[]}} cell - The cell descriptor.
+	 * @param {boolean} flush - Whether to flush this cell immediately.
+	 * @returns {number} The wrapper's unique id (its sign).
+	 */
 	function bindFreshItem(listHandle, listId, cellIndex, opId, cell, flush) {
 		const wrapperHandle = __CreateElement("list-item", pageId, {});
 		__SetAttribute(wrapperHandle, "item-key", String(cellIndex));
@@ -83,6 +124,17 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return sign;
 	}
 
+	/**
+	 * Reuses an off-screen wrapper for a different cell: clears it, repositions it, and replays the new ops.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {number} cellIndex - The cell's index.
+	 * @param {number} opId - Native operation id for the flush.
+	 * @param {{typeKey: string, containerId: number, ops: unknown[], rootChildIds: number[]}} cell - The cell descriptor.
+	 * @param {Map<number, Object>} pool - Available entries of the same type.
+	 * @param {boolean} flush - Whether to flush this cell immediately.
+	 * @returns {number} The wrapper's unique id (its sign).
+	 */
 	function bindRecycledItem(listHandle, listId, cellIndex, opId, cell, pool, flush) {
 		const [sign, entry] = pool.entries().next().value;
 		pool.delete(sign);
@@ -98,6 +150,16 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return sign;
 	}
 
+	/**
+	 * Binds a cell, recycling a same-type wrapper when one is available.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {number} cellIndex - The cell's index.
+	 * @param {number} opId - Native operation id for the flush.
+	 * @param {boolean} flush - Whether to flush this cell immediately.
+	 * @returns {number} The wrapper's unique id (its sign).
+	 * @throws {Error} If `cellIndex` is out of range.
+	 */
 	function bindCell(listHandle, listId, cellIndex, opId, flush) {
 		if (cellIndex < 0 || cellIndex >= count) {
 			throw new Error(`[mithril-lynx] list: cellIndex ${cellIndex} out of range (itemCount=${count})`);
@@ -108,6 +170,14 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		return bindFreshItem(listHandle, listId, cellIndex, opId, cell, flush);
 	}
 
+	/**
+	 * Native callback: provides the cell at one index.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {number} cellIndex - The requested index.
+	 * @param {number} opId - Native operation id.
+	 * @returns {number} The wrapper's unique id (its sign).
+	 */
 	function componentAtIndex(listHandle, listId, cellIndex, opId) {
 		return bindCell(listHandle, listId, cellIndex, opId, true);
 	}
@@ -120,12 +190,24 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 	 * `__FlushElementTree` covering all of them (`operationIDs`/`elementIDs`
 	 * arrays), not one per cell — the real reason a native list's initial,
 	 * simultaneously-visible cells need this at all.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {number[]} cellIndexes - The requested indexes.
+	 * @param {number[]} operationIDs - Native operation ids, one per index.
+	 * @returns {void}
 	 */
 	function componentAtIndexes(listHandle, listId, cellIndexes, operationIDs) {
 		const elementIDs = cellIndexes.map((cellIndex, i) => bindCell(listHandle, listId, cellIndex, operationIDs[i], false));
 		__FlushElementTree(listHandle, { triggerLayout: true, operationIDs, elementIDs, listID: listId });
 	}
 
+	/**
+	 * Native callback: a cell scrolled off-screen and becomes available for recycling.
+	 * @param {*} _listHandle - Unused.
+	 * @param {number} _listId - Unused.
+	 * @param {number} sign - The wrapper's unique id.
+	 * @returns {void}
+	 */
 	function enqueueComponent(_listHandle, _listId, sign) {
 		const entry = signMap.get(sign);
 		if (entry == null) return;
@@ -134,6 +216,15 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		recycleMap.get(entry.typeKey).set(sign, entry);
 	}
 
+	/**
+	 * Tells the native list about inserted, removed and updated cells.
+	 * @param {*} listHandle - The native list element.
+	 * @param {number} listId - The list's unique id.
+	 * @param {Array<Object>} insertAction - Inserted cell descriptors.
+	 * @param {number[]} removeAction - Removed positions.
+	 * @param {Array<Object>} updateAction - Updated cell descriptors.
+	 * @returns {void}
+	 */
 	function sendListInfo(listHandle, listId, insertAction, removeAction, updateAction) {
 		__SetAttribute(listHandle, "update-list-info", { insertAction, removeAction, updateAction });
 		__UpdateListCallbacks(listHandle, componentAtIndex, enqueueComponent, componentAtIndexes);
@@ -154,6 +245,10 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 	// check would need to compare `ops` arrays, not implemented yet. Cells
 	// that aren't attached right now just pick up their new content next
 	// time componentAtIndex asks for that index.
+	/**
+	 * @param {Array<{typeKey: string, containerId: number, ops: unknown[], rootChildIds: number[]}>} nextCells - The new cells.
+	 * @returns {void}
+	 */
 	function refreshAttachedCells(nextCells) {
 		for (const [sign, entry] of signMap) {
 			const nextCell = nextCells[entry.cellIndex];
@@ -166,6 +261,11 @@ export function createNativeList(pageId, scrollOrientation, listType, spanCount,
 		}
 	}
 
+	/**
+	 * Replaces the list's cells, refreshing attached ones and notifying native of count changes.
+	 * @param {Array<{typeKey: string, containerId: number, ops: unknown[], rootChildIds: number[]}>} nextCells - The new cells.
+	 * @returns {void}
+	 */
 	function setCells(nextCells) {
 		const nextCount = nextCells.length;
 		refreshAttachedCells(nextCells);

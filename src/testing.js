@@ -34,6 +34,8 @@ export { createPatchApplier } from "./apply-patch.js";
  * list ops (Op.SetGestureDetector/Op.CreateList) are covered by the testing
  * environment itself, not by this polyfill — see test/gesture.test.ts and
  * test/list.test.ts.
+ * @param {{lynx: Object}} target - The main-thread globals object from `@lynx-js/testing-environment`.
+ * @returns {void}
  */
 export function installTestingPolyfills(target) {
 	target.lynx.getEngine = target.lynx.getNative;
@@ -44,11 +46,28 @@ export function installTestingPolyfills(target) {
 	// requires it (FiberRemoveEventListener throws "param size should >= 4"
 	// without it), so __RemoveEventListener mirrors that arity requirement to
 	// keep the test environment honest about the wire contract.
+	/**
+	 * Stand-in for the native `__AddEventListener` PAPI.
+	 * @param {Object} node - The element.
+	 * @param {string} name - The event type.
+	 * @param {Function} handler - The listener.
+	 * @param {Object} _options - Accepted and ignored.
+	 * @returns {void}
+	 */
 	target.__AddEventListener = (node, name, handler, _options) => {
 		node.__vanillaListeners ??= {};
 		(node.__vanillaListeners[name] ??= new Set()).add(handler);
 	};
 
+	/**
+	 * Stand-in for the native `__RemoveEventListener` PAPI.
+	 * @param {Object} node - The element.
+	 * @param {string} name - The event type.
+	 * @param {Function} handler - The listener to remove.
+	 * @param {Object} _options - Required (four arguments), mirroring native.
+	 * @returns {void}
+	 * @throws {Error} If called with fewer than four arguments.
+	 */
 	target.__RemoveEventListener = function (node, name, handler, _options) {
 		if (arguments.length < 4) {
 			throw new Error(

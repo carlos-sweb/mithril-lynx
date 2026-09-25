@@ -70,6 +70,10 @@ export const Op = Object.freeze({
  * Encodes one op onto a flat ops array. Kept as a tiny helper (not a class)
  * so the hot path (called on every attribute/child mutation during a real
  * Mithril diff) is just array pushes — no object allocation per op.
+ * @param {unknown[]} ops - The flat ops array to append to.
+ * @param {number} opcode - One of the `Op` codes.
+ * @param {...unknown} args - The op's arguments (see `OP_ARITY`).
+ * @returns {void}
  */
 export function pushOp(ops, opcode, ...args) {
 	ops.push(opcode, ...args);
@@ -104,7 +108,12 @@ export const OP_ARITY = Object.freeze({
 
 /** Walks a flat ops array, calling `visit(opcode, args)` once per op — args
  * is the plain slice of that op's own arguments (not including the opcode
- * itself). Throws on an unknown opcode rather than silently desyncing. */
+ * itself). Throws on an unknown opcode rather than silently desyncing.
+ * @param {unknown[]} ops - A flat ops array.
+ * @param {(opcode: number, args: unknown[]) => void} visit - Called once per op with its arguments.
+ * @returns {void}
+ * @throws {Error} On an unknown opcode.
+ */
 export function forEachOp(ops, visit) {
 	for (let i = 0; i < ops.length; ) {
 		const opcode = ops[i++];

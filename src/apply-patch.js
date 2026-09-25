@@ -47,6 +47,10 @@ const GestureState = { active: 1, fail: 2, end: 3 };
 // this project's own predecessor, mithril-lynx v1's gesture.js), not
 // specific to any one package — every gesture callback has to be wrapped
 // through this registry before being handed to __SetGestureDetector.
+/**
+ * Installs the global worklet registry native requires (`registerWorklet`/`runWorklet`) if not already present.
+ * @returns {void}
+ */
 function ensureWorkletRuntime() {
 	if (globalThis.lynxWorkletImpl !== undefined) return;
 	globalThis.lynxWorkletImpl = { _workletMap: {} };
@@ -66,6 +70,11 @@ function ensureWorkletRuntime() {
 }
 
 let nextWorkletId = 1;
+/**
+ * Registers a gesture callback in the worklet registry under a fresh id.
+ * @param {Function} fn - The callback native should invoke.
+ * @returns {{_wkltId: string}} The worklet context object to hand to `__SetGestureDetector`.
+ */
 function wrapWorkletCallback(fn) {
 	ensureWorkletRuntime();
 	const id = "mithril-lynx-gesture-" + nextWorkletId++;
@@ -89,6 +98,8 @@ function wrapWorkletCallback(fn) {
  * device-verified sheet.js/swipe-action.js/swiper.js already did; the NEW
  * part, evaluating it here instead of in app code, has not been confirmed
  * to feel the same on-device.
+ * @param {{mode?: "claim"|"axis-lock", axis?: "horizontal"|"vertical", referenceMoves?: number}} [policy] - The claim/release policy; defaults to `{ mode: "claim" }`.
+ * @returns {{onDown: (x: number, y: number, consume: (claim: boolean) => void) => void, onMove: (x: number, y: number, consume: (claim: boolean) => void, fail: () => void) => void}} The tracker driven by native touch events.
  */
 function createArenaTracker(policy) {
 	const mode = (policy && policy.mode) || "claim";
@@ -98,6 +109,13 @@ function createArenaTracker(policy) {
 	let decided = false;
 
 	return {
+		/**
+		 * Handles touches-down: claims the gesture and records the reference point when applicable.
+		 * @param {number} x - Touch `clientX`.
+		 * @param {number} y - Touch `clientY`.
+		 * @param {(claim: boolean) => void} consume - Claims (`true`) or releases (`false`) the gesture arena.
+		 * @returns {void}
+		 */
 		onDown(x, y, consume) {
 			consume(true);
 			if (mode === "axis-lock" && (policy.referenceMoves || 0) === 0) {
@@ -105,6 +123,14 @@ function createArenaTracker(policy) {
 				refY = y;
 			}
 		},
+		/**
+		 * Handles touches-move: for `axis-lock`, decides once whether the dominant axis matches, otherwise releases and fails the gesture.
+		 * @param {number} x - Touch `clientX`.
+		 * @param {number} y - Touch `clientY`.
+		 * @param {(claim: boolean) => void} consume - Claims (`true`) or releases (`false`) the gesture arena.
+		 * @param {() => void} fail - Marks the gesture as failed.
+		 * @returns {void}
+		 */
 		onMove(x, y, consume, fail) {
 			if (mode !== "axis-lock" || decided) return;
 			if ((policy.referenceMoves || 0) === 1 && movesSeen === 0) {
@@ -135,15 +161,34 @@ function createArenaTracker(policy) {
 	};
 }
 
+/**
+ * Registers a native gesture detector on an element and forwards its touch events to the background thread.
+ * @param {*} handle - The real PAPI element handle.
+ * @param {number} id - The background-side element id.
+ * @param {number} gestureId - The gesture id allocated on the background thread.
+ * @param {string|number} gestureType - A gesture type name (e.g. `"pan"`) or its numeric code.
+ * @param {{mode?: string, axis?: string, referenceMoves?: number}} [arenaPolicy] - The claim/release policy.
+ * @param {(id: number, type: string, payload: unknown) => void} [onEvent] - Receives `gesturedown`/`gesturemove`/`gestureup` events.
+ * @returns {void}
+ */
 function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent) {
 	const tracker = createArenaTracker(arenaPolicy);
 	const gestureTypeCode = typeof gestureType === "string" ? GESTURE_TYPE_CODES[gestureType] : gestureType;
 
+	/**
+	 * @param {*} controller - The native gesture controller passed to the callback.
+	 * @param {boolean} shouldClaim - Whether to claim (`true`) or release (`false`) the arena.
+	 * @returns {void}
+	 */
 	function consume(controller, shouldClaim) {
 		if (controller != null && typeof controller.__ConsumeGesture === "function") {
 			controller.__ConsumeGesture(handle, gestureId, { consume: shouldClaim, inner: false });
 		}
 	}
+	/**
+	 * @param {*} controller - The native gesture controller passed to the callback.
+	 * @returns {void}
+	 */
 	function fail(controller) {
 		if (controller != null && typeof controller.__SetGestureState === "function") {
 			controller.__SetGestureState(handle, gestureId, GestureState.fail);
@@ -155,6 +200,10 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
 	// rather than having a consumer approximate it from receipt time on
 	// the background thread, which would fold cross-thread forwarding
 	// latency into a velocity computation.
+	/**
+	 * @param {{params?: {clientX?: number, clientY?: number, timestamp?: number}}} [event] - A native touch/gesture event.
+	 * @returns {{clientX: number|undefined, clientY: number|undefined, timestamp: number|undefined}} The event's coordinates and timestamp.
+	 */
 	function coordsOf(event) {
 		const p = (event && event.params) || {};
 		return { clientX: p.clientX, clientY: p.clientY, timestamp: p.timestamp };
@@ -203,6 +252,7 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
  *   calling the bare, whole-page flush too, from inside native's own
  *   synchronous componentAtIndex callback, is a second, unrelated flush this
  *   applier was never meant to trigger on that call site's behalf.
+ * @returns {{registerPageRoot: (pageElementHandle: *) => void, registerRoot: (id: number, handle: *) => void, applyPatch: (ops: unknown[]) => void, getHandle: (id: number) => *}} The patch applier.
  */
 export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// id (as allocated by the background's virtual backend) -> real PAPI
@@ -225,15 +275,29 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	/** General form: seed the mapping for any id, not just the page root —
 	 * list-support.js uses this to alias a list-cell.js `containerId` (an
 	 * off-tree id from the background thread's OWN document) to the real
-	 * native wrapper element it created for that cell. */
+	 * native wrapper element it created for that cell.
+	 * @param {number} id - The background-side id to alias.
+	 * @param {*} handle - The real PAPI element handle it maps to.
+	 * @returns {void}
+	 */
 	function registerRoot(id, handle) {
 		handles.set(id, handle);
 	}
 
+	/**
+	 * Maps the reserved id `0` to the real page element.
+	 * @param {*} pageElementHandle - The page element created by `__CreatePage`.
+	 * @returns {void}
+	 */
 	function registerPageRoot(pageElementHandle) {
 		registerRoot(0, pageElementHandle);
 	}
 
+	/**
+	 * Creates the real PAPI element for a tag.
+	 * @param {string} tag - The tag name (`view` and `text` use their dedicated creators).
+	 * @returns {*} The new element handle.
+	 */
 	function createElementHandle(tag) {
 		if (tag === "view") return __CreateView(pageId);
 		if (tag === "text") return __CreateText(pageId);
@@ -250,6 +314,9 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	 * its own list-specific `__FlushElementTree(wrapperHandle, {...})` call
 	 * afterward instead — that one, not this one, is that cell's real
 	 * commit point.
+	 * @param {unknown[]} ops - A flat op array (opcode followed by its arguments, repeated).
+	 * @returns {void}
+	 * @throws {Error} If an unknown opcode is encountered, or `Op.RemoveEvent` needs `__RemoveEventListener` and it is unavailable.
 	 */
 	function applyPatch(ops) {
 		for (let i = 0; i < ops.length; ) {
@@ -365,6 +432,11 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const id = ops[i++];
 					const type = ops[i++];
 					const handle = handles.get(id);
+					/**
+					 * Forwards a native event to the background thread.
+					 * @param {*} nativeEvent - The native event object.
+					 * @returns {void}
+					 */
 					const listener = (nativeEvent) => {
 						onEvent?.(id, type, nativeEvent);
 					};
@@ -454,7 +526,10 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		 * recording (mithril-lynx-v1's own installTestingPolyfills wraps
 		 * every `__`-prefixed call regardless of which package called it, so
 		 * this is how a v2 test finds "which of those calls targeted THIS
-		 * element") — never needed by application code. */
+		 * element") — never needed by application code.
+		 * @param {number} id - The background-side element id.
+		 * @returns {*} The real element handle, or `undefined` when none exists.
+		 */
 		getHandle(id) {
 			return handles.get(id);
 		},

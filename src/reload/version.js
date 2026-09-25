@@ -13,16 +13,25 @@
 
 let version = 0;
 
+/**
+ * @returns {number} The current reload version.
+ */
 export function getReloadVersion() {
 	return version;
 }
 
+/**
+ * @returns {number} The new reload version, after incrementing.
+ */
 export function increaseReloadVersion() {
 	return ++version;
 }
 
 /** True if a patch stamped with `patchVersion` is stale and must be
- * dropped without being applied — the ENTIRE guard, one comparison. */
+ * dropped without being applied — the ENTIRE guard, one comparison.
+ * @param {*} patchVersion - The version stamped on a patch.
+ * @returns {boolean} `true` when `patchVersion` is a number older than the current version.
+ */
 export function isStaleVersion(patchVersion) {
 	return typeof patchVersion === "number" && patchVersion < version;
 }
