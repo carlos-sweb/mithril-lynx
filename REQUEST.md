@@ -28,6 +28,7 @@ Matches real `m.request`: GET by default, `:param` interpolation in the URL (reu
 | `extract` | `(response, options) => any` — bypasses the status check entirely, same as upstream's `(xhr, options) => any`. Signature changes (`response` instead of `xhr`) since there's no XHR object; the purpose is identical. |
 | `type` | Constructor applied to the result, unchanged from upstream. |
 | `timeout` | Real cancellation, not just giving up on waiting — backed by `AbortController`, confirmed on device to actually tear down the in-flight connection (aborting 800ms into a 5-second server-side delay rejected at ~805ms, not 5000ms). |
+| `signal` | `AbortSignal` — linked into the request's own `AbortController`, so a caller-provided signal aborts the request exactly like `.abort()`/`timeout`. Not part of real `m.request` (which only reached `xhr.abort()` via `config`); a natural addition here for the same reason `.abort()` is. |
 | `background` | Same as upstream: skip the automatic redraw. |
 | `.abort()` | **Not part of real `m.request`'s API** — a bonus method on the returned promise, since Lynx's `AbortController` makes it a real, working cancellation (real `m.request` only exposes this indirectly, through `config(xhr) => xhr.abort()`, which has no equivalent here — see below). |
 
@@ -45,15 +46,17 @@ These have no `fetch` equivalent on Lynx. Passing any of them throws right away,
 
 ## Error shape
 
-Matches real `m.request` on a non-2xx response:
+`err.code` (the HTTP status) and `err.response` (the already-parsed body) match real `m.request` on a non-2xx response:
 
 ```js
 request("/missing").catch((err) => {
   err.code;      // response.status
-  err.message;   // response.statusText, unless the body was a plain string
+  err.message;   // response.statusText, unless the parsed body is a plain string
   err.response;  // the already-parsed body
 });
 ```
+
+**One small divergence to be aware of:** real `m.request` sets `err.message` to the raw `responseText` (the body as-is), whereas this wrapper uses `response.statusText` unless the parsed body happens to be a string. `fetch`'s `Response` is single-use — once `.json()` has consumed it, the raw text is gone — so matching upstream's raw-body message would require reading the body as text first; that's not done here. See `FETCH_INVESTIGATION.md` for the full option-by-option comparison.
 
 ## Testing
 

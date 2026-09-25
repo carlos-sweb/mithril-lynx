@@ -40,7 +40,7 @@ route.get();                             // current resolved path, e.g. "/detail
 route.param("id");                       // "42" — or route.param() for the whole params object
 ```
 
-`route.back()` / `route.forward()` walk the same in-memory history stack `route.set` writes to. **These do not exist on real Mithril** — they're new here because Lynx has no hardware/gesture "back" button exposed to JS (only app-lifecycle events like `onAppEnterBackground`, not navigation), so an app's own back affordance has to call something explicit. Wire a screen's back button to `route.back()`.
+`route.back()` / `route.forward()` walk the same in-memory history stack `route.set` writes to. **These do not exist on real Mithril** — they're new here because Lynx has no hardware/gesture "back" button exposed to JS (only app-lifecycle events like `onAppEnterBackground`, not navigation), so an app's own back affordance has to call something explicit. Wire a screen's back button to `route.back()`. Both return `true` when they navigated and `false` at the top/end of the stack (a silent no-op at the boundary), so a back/forward affordance can enable/disable itself from the return value.
 
 `route.prefix` exists only so app code defensively ported from a real Mithril app (`m.route.prefix = ""`) doesn't throw on import — there's no URL bar for a prefix to apply to, so setting it does nothing.
 

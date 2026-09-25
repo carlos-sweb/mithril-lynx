@@ -15,7 +15,7 @@ The old implementation's core bugs all traced back to the same root cause: wheth
   - **B — structural reload**: adding/removing/reordering tree nodes. The old version assumed this *had* to be a full reload; this one lets Mithril's own real diff (running in the background against a real tree) produce the right Create/Insert/Remove ops instead — no separate wire-protocol mode needed, just reconciliation that doesn't discard nodes that didn't change.
   - **C — full reload**: fallback for what A/B can't resolve (new imports, changed dependencies, an unrecoverable error). Same CDP `Page.reload` mechanism stabilized in the old version's 0.0.9, rewritten on the new core.
 
-**Deliberately not carried over from the old version (yet)**: gestures, list virtualization (Tier 2), the imperative ref helpers, and the old stack-based `navigation` module. Those were real, device-verified capabilities there — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
+**Carried over as code, not yet device-verified**: gestures and list virtualization (Tier 2) exist in this rewrite — `src/apply-patch.js`'s `Op.SetGestureDetector`/`Op.CreateList` cases, `src/list-cell.js`, `src/list-support.js` — and are exported as `mithril-lynx/list-support` and `mithril-lynx/list-cell`. The new arena-claim gesture path is explicitly unverified on a real device (see the note in `apply-patch.js`). **Deliberately not carried over at all (yet)**: the imperative ref helpers and the old stack-based `navigation` module. Those were real, device-verified capabilities in v1 — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
 
 ## Usage
 
@@ -65,6 +65,7 @@ Use a plain CSS `@font-face` rule — not `lynx.addFont()` (that JS API only fir
 
 - **`m.trust`** — not present. Stripped from `mithril-runtime` at the source, and Lynx's Element PAPI has no innerHTML-equivalent injection point to reimplement it against anyway (same permanent gap v1 documented).
 - **A handful of `m.request` options with no `fetch` equivalent** (`config`, `async: false`, `user`/`password`, `withCredentials`) throw immediately with a message pointing at `FETCH_INVESTIGATION.md`, rather than silently behaving differently — see `REQUEST.md`.
+- **The event object passed to handlers is a synthesized snapshot, not a live DOM event.** `preventDefault()` and `stopPropagation()` on it are no-ops, and events do not bubble — the fake DOM (`src/fake-dom.js`) dispatches directly to the single node the native event targeted. Code ported from the web that calls `e.preventDefault()` (e.g. form submit) will silently do nothing. `e.redraw = false` still works, and is how `route.Link` opts out of the post-tap redraw.
 
 ## Testing
 
