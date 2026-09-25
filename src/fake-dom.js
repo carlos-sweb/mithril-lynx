@@ -173,6 +173,17 @@ class LynxContainerNode extends LynxNode {
 		this._removeChildBookkeeping(child);
 		if (this._id != null && child._id != null) {
 			this._backend.removeChild(this._id, child._id);
+			// render.js only removes the ROOT of a removed subtree, so every
+			// descendant has to leave `_nodesById` here too — otherwise the
+			// whole detached subtree stays reachable forever. Moves never
+			// come through here (insertBefore uses _removeChildBookkeeping).
+			const nodesById = this.ownerDocument._nodesById;
+			const stack = [child];
+			while (stack.length > 0) {
+				const node = stack.pop();
+				nodesById.delete(node._id);
+				if (node._children) for (const c of node._children) stack.push(c);
+			}
 		}
 		return child;
 	}
@@ -583,16 +594,17 @@ export class LynxDocument extends LynxContainerNode {
 		this._id = 0;
 		this.namespaceURI = undefined;
 		/** id -> node, for dispatching a forwarded native event (which only
-		 * carries an id + type) to the right fake-dom element. Populated by
-		 * every LynxElement/LynxText constructor; never by fragments, which
-		 * have no id and are never event targets. */
+		 * carries an id + type) to the right fake-dom element. Populated only
+		 * by the LynxElement constructor: text nodes have an id but are never
+		 * event targets, fragments have no id at all, and the document itself
+		 * (id 0) is not registered either. */
 		this._nodesById = new Map();
 	}
 
 	/**
 	 * Looks up a node by backend id, used to route forwarded native events.
 	 * @param {number} id - The backend id.
-	 * @returns {LynxElement|LynxText|LynxDocument|null} The node, or `null` when unknown.
+	 * @returns {LynxElement|null} The element, or `null` when unknown (text nodes and the document are never registered).
 	 */
 	getNodeById(id) {
 		return this._nodesById.get(id) ?? null;

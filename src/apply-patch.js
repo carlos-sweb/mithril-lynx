@@ -272,6 +272,40 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// stored here and reused by the Op.RemoveEvent case.
 	const eventListeners = new Map();
 
+	// The tree shape as seen through InsertBefore/RemoveChild ops. Mithril's
+	// removeDOM (render.js) only ever calls removeChild on the ROOT of a
+	// removed subtree — descendants never get an Op.RemoveChild of their own —
+	// so without this, every descendant's `handles`/`eventListeners`/
+	// `listSetters` entry would outlive the removal, and `handles` would keep
+	// the whole detached native subtree reachable from JS.
+	const childrenOf = new Map(); // parent id -> Set<child id>
+	const parentOf = new Map(); // child id -> parent id
+
+	/**
+	 * Drops every per-id entry for `id` and all of its known descendants.
+	 * Iterative (explicit stack) so a deep subtree can't overflow the call
+	 * stack. Native listeners are not removed one by one: they live on the
+	 * native elements, which go away with the detached subtree once JS stops
+	 * holding their handles.
+	 * @param {number} id - The root of the removed subtree.
+	 * @returns {void}
+	 */
+	function releaseSubtree(id) {
+		const stack = [id];
+		while (stack.length > 0) {
+			const current = stack.pop();
+			const children = childrenOf.get(current);
+			if (children != null) {
+				for (const childId of children) stack.push(childId);
+				childrenOf.delete(current);
+			}
+			parentOf.delete(current);
+			handles.delete(current);
+			eventListeners.delete(current);
+			listSetters.delete(current);
+		}
+	}
+
 	/** General form: seed the mapping for any id, not just the page root —
 	 * list-support.js uses this to alias a list-cell.js `containerId` (an
 	 * off-tree id from the background thread's OWN document) to the real
@@ -356,13 +390,22 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					} else {
 						__InsertElementBefore(parent, child, handles.get(refId));
 					}
+					// A move (the child already had a parent) detaches it from
+					// the old parent's set first.
+					const previousParentId = parentOf.get(childId);
+					if (previousParentId !== undefined) childrenOf.get(previousParentId)?.delete(childId);
+					let siblings = childrenOf.get(parentId);
+					if (siblings == null) childrenOf.set(parentId, (siblings = new Set()));
+					siblings.add(childId);
+					parentOf.set(childId, parentId);
 					break;
 				}
 				case Op.RemoveChild: {
 					const parentId = ops[i++];
 					const childId = ops[i++];
 					__RemoveElement(handles.get(parentId), handles.get(childId));
-					handles.delete(childId);
+					childrenOf.get(parentId)?.delete(childId);
+					releaseSubtree(childId);
 					break;
 				}
 				case Op.SetAttribute: {
