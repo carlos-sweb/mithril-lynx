@@ -83,6 +83,18 @@ function wrapWorkletCallback(fn) {
 }
 
 /**
+ * Deletes worklets from the registry. A native callback that still arrives
+ * for a deleted id is a no-op: `runWorklet` ignores unknown ids.
+ * @param {string[]} ids - The worklet ids to delete.
+ * @returns {void}
+ */
+function unregisterWorklets(ids) {
+	const impl = globalThis.lynxWorkletImpl;
+	if (impl === undefined) return;
+	for (const id of ids) delete impl._workletMap[id];
+}
+
+/**
  * A small, generic claim/release policy — covers the two real shapes this
  * project's consumers need, not an arbitrary one:
  *   - `{ mode: "claim" }` — claim on touches-down, never reconsider (a
@@ -169,7 +181,7 @@ function createArenaTracker(policy) {
  * @param {string|number} gestureType - A gesture type name (e.g. `"pan"`) or its numeric code.
  * @param {{mode?: string, axis?: string, referenceMoves?: number}} [arenaPolicy] - The claim/release policy.
  * @param {(id: number, type: string, payload: unknown) => void} [onEvent] - Receives `gesturedown`/`gesturemove`/`gestureup` events.
- * @returns {void}
+ * @returns {string[]} The ids of the worklets registered for this detector, to pass to `unregisterWorklets` when it goes away.
  */
 function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent) {
 	const tracker = createArenaTracker(arenaPolicy);
@@ -225,15 +237,12 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
 		},
 	};
 
+	const wrapped = Object.keys(callbacks).map((name) => ({ name, callback: wrapWorkletCallback(callbacks[name]) }));
+
 	__SetAttribute(handle, "has-react-gesture", true);
 	__SetAttribute(handle, "flatten", false);
-	__SetGestureDetector(
-		handle,
-		gestureId,
-		gestureTypeCode,
-		{ callbacks: Object.keys(callbacks).map((name) => ({ name, callback: wrapWorkletCallback(callbacks[name]) })) },
-		{},
-	);
+	__SetGestureDetector(handle, gestureId, gestureTypeCode, { callbacks: wrapped }, {});
+	return wrapped.map((entry) => entry.callback._wkltId);
 }
 
 /**
@@ -272,21 +281,29 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	// stored here and reused by the Op.RemoveEvent case.
 	const eventListeners = new Map();
 
+	// id -> Map<gestureId, worklet ids>. Every worklet closure holds its
+	// element's native handle, so the registry entries must be deleted when
+	// the detector (Op.RemoveGestureDetector) or its element (releaseSubtree)
+	// goes away — otherwise the global registry keeps the handle alive forever.
+	const gestureWorklets = new Map();
+
 	// The tree shape as seen through InsertBefore/RemoveChild ops. Mithril's
 	// removeDOM (render.js) only ever calls removeChild on the ROOT of a
 	// removed subtree — descendants never get an Op.RemoveChild of their own —
 	// so without this, every descendant's `handles`/`eventListeners`/
-	// `listSetters` entry would outlive the removal, and `handles` would keep
-	// the whole detached native subtree reachable from JS.
+	// `listSetters`/`gestureWorklets` entry would outlive the removal, and
+	// `handles` (plus the worklet registry) would keep the whole detached
+	// native subtree reachable from JS.
 	const childrenOf = new Map(); // parent id -> Set<child id>
 	const parentOf = new Map(); // child id -> parent id
 
 	/**
 	 * Drops every per-id entry for `id` and all of its known descendants.
 	 * Iterative (explicit stack) so a deep subtree can't overflow the call
-	 * stack. Native listeners are not removed one by one: they live on the
-	 * native elements, which go away with the detached subtree once JS stops
-	 * holding their handles.
+	 * stack. Native listeners and gesture detectors are not removed one by
+	 * one: they live on the native elements, which go away with the detached
+	 * subtree once JS stops holding their handles (including through the
+	 * gesture worklets, which are unregistered here).
 	 * @param {number} id - The root of the removed subtree.
 	 * @returns {void}
 	 */
@@ -303,6 +320,11 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 			handles.delete(current);
 			eventListeners.delete(current);
 			listSetters.delete(current);
+			const gestures = gestureWorklets.get(current);
+			if (gestures != null) {
+				for (const workletIds of gestures.values()) unregisterWorklets(workletIds);
+				gestureWorklets.delete(current);
+			}
 		}
 	}
 
@@ -525,7 +547,10 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const gestureType = ops[i++];
 					const arenaPolicy = ops[i++];
 					const handle = handles.get(id);
-					registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent);
+					const workletIds = registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy, onEvent);
+					let byGesture = gestureWorklets.get(id);
+					if (byGesture == null) gestureWorklets.set(id, (byGesture = new Map()));
+					byGesture.set(gestureId, workletIds);
 					break;
 				}
 				case Op.RemoveGestureDetector: {
@@ -533,6 +558,13 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					const gestureId = ops[i++];
 					const handle = handles.get(id);
 					if (typeof __RemoveGestureDetector === "function") __RemoveGestureDetector(handle, gestureId);
+					const byGesture = gestureWorklets.get(id);
+					const workletIds = byGesture ? byGesture.get(gestureId) : undefined;
+					if (workletIds != null) {
+						unregisterWorklets(workletIds);
+						byGesture.delete(gestureId);
+						if (byGesture.size === 0) gestureWorklets.delete(id);
+					}
 					break;
 				}
 				case Op.CreateList: {

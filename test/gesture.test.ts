@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import m from "mithril";
 import { renderApp } from "../src/background.js";
 import { createPatchApplier } from "../src/apply-patch.js";
+import { Op } from "../src/patch-protocol.js";
 
 // Op.SetGestureDetector end-to-end: a component calls vnode.dom's own
 // setGestureDetector() (fake-dom.js) in oncreate, the resulting op gets
@@ -171,5 +172,79 @@ describe("Op.SetGestureDetector (native gesture support)", () => {
 		callback(touchEvent(42, 0), controller);
 
 		expect(moves).toEqual([42]);
+	});
+});
+
+// Every gesture worklet closure holds its element's native handle, so the
+// global registry must drop a detector's worklets when the detector — or its
+// element, or any ancestor — goes away; otherwise it keeps the handle alive.
+describe("gesture worklets are unregistered when their detector goes away", () => {
+	const registrySize = () => Object.keys((globalThis as any).lynxWorkletImpl?._workletMap ?? {}).length;
+
+	function mountApplier(receivedEvents: string[] = []) {
+		lynxTestingEnv.switchToMainThread();
+		const pageId = __GetElementUniqueID(__CreatePage());
+		const applier = createPatchApplier(pageId, { onEvent: (_id, type) => receivedEvents.push(type) });
+		applier.registerPageRoot(__CreateView(pageId));
+		return applier;
+	}
+
+	it("Op.RemoveGestureDetector unregisters the detector's worklets", () => {
+		const received: string[] = [];
+		const applier = mountApplier(received);
+		applier.applyPatch([Op.CreateElement, "view", 1, Op.InsertBefore, 0, 1, -1]);
+		const before = registrySize();
+
+		applier.applyPatch([Op.SetGestureDetector, 1, 7, "native", { mode: "claim" }]);
+		expect(registrySize()).toBe(before + 3);
+		const callbacks = gestureCallbacksOf(applier.getHandle(1));
+
+		applier.applyPatch([Op.RemoveGestureDetector, 1, 7]);
+		expect(registrySize()).toBe(before);
+
+		// A late native callback for an unregistered worklet is a no-op.
+		callbacks.onTouchesMove(touchEvent(1, 1), makeController());
+		expect(received).toEqual([]);
+	});
+
+	it("removing an ancestor unregisters the worklets of detectors in its subtree", () => {
+		const applier = mountApplier();
+		applier.applyPatch([
+			Op.CreateElement, "view", 1,
+			Op.CreateElement, "view", 2,
+			Op.InsertBefore, 0, 1, -1,
+			Op.InsertBefore, 1, 2, -1,
+		]);
+		const before = registrySize();
+
+		applier.applyPatch([Op.SetGestureDetector, 2, 8, "native", { mode: "claim" }]);
+		expect(registrySize()).toBe(before + 3);
+
+		applier.applyPatch([Op.RemoveChild, 0, 1]);
+		expect(registrySize()).toBe(before);
+	});
+
+	it("removing one detector keeps another element's worklets working", () => {
+		const received: string[] = [];
+		const applier = mountApplier(received);
+		applier.applyPatch([
+			Op.CreateElement, "view", 1,
+			Op.CreateElement, "view", 2,
+			Op.InsertBefore, 0, 1, -1,
+			Op.InsertBefore, 0, 2, -1,
+		]);
+		const before = registrySize();
+
+		applier.applyPatch([
+			Op.SetGestureDetector, 1, 9, "native", { mode: "claim" },
+			Op.SetGestureDetector, 2, 10, "native", { mode: "claim" },
+		]);
+		const survivor = gestureCallbacksOf(applier.getHandle(2));
+
+		applier.applyPatch([Op.RemoveChild, 0, 1]);
+		expect(registrySize()).toBe(before + 3);
+
+		survivor.onTouchesMove(touchEvent(1, 1), makeController());
+		expect(received).toEqual(["gesturemove"]);
 	});
 });
