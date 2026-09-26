@@ -4,6 +4,15 @@ Mithril.js rendered through [Lynx](https://lynxjs.org)'s Element PAPI, with genu
 
 > **Note:** this is a complete, from-scratch rewrite of the previous `mithril-lynx` (internally, "v2") — not an incremental patch on top of it. The old implementation is retired; no more fixes land against that design. See "Why a rewrite" below for exactly what justified starting over instead of patching it again.
 
+## What's new in 3.0.0
+
+- **Native `<list>` / `<list-item>` as ordinary Mithril elements** — keyed items, every attribute with its real type, attached on demand by native. Breaking: replaces `Op.CreateList`/`Op.SetListItems` and the `list-cell`/`list-support` entry points. See below.
+- **`<input>` / `<textarea>` like on the web** — `value`, `autofocus`, and `vnode.dom.focus()`/`blur()`/`invoke(method, params)` for any element's native UI methods, with no `id`, `setTimeout` or selector query. See [`INPUT.md`](./INPUT.md).
+- **`route` parity with Mithril's `m.route`** — asynchronous `set()`, `options.state`, `:key` remounts, `route.Link` fixes, plus `canGoBack()` and an opt-in Android back button (`listenBackButton()`). Breaking: `set()` now resolves on the next microtask. See [`ROUTE.md`](./ROUTE.md).
+- Leak fixes, render coalescing for high-frequency events, and a style-clear fix.
+
+Full list: [`CHANGELOG.md`](./CHANGELOG.md). The main-thread and background bundles must be rebuilt together (patch protocol `0x4d4e`).
+
 ## Why a rewrite
 
 The old implementation's core bugs all traced back to the same root cause: whether a redraw actually reached the main thread depended on runtime conditions (`typeof globalThis.__FlushElementTree === "function"`, which render mode was active, load order) instead of a fixed contract. Every fix added another conditional on top of the last one. Reading ReactLynx's own source (not just its docs) showed its actual patch-channel/reload design is a different architecture, not an incremental improvement on the old one — so this rewrite starts over with that contract from the first commit:
@@ -15,7 +24,7 @@ The old implementation's core bugs all traced back to the same root cause: wheth
   - **B — structural reload**: adding/removing/reordering tree nodes. The old version assumed this *had* to be a full reload; this one lets Mithril's own real diff (running in the background against a real tree) produce the right Create/Insert/Remove ops instead — no separate wire-protocol mode needed, just reconciliation that doesn't discard nodes that didn't change.
   - **C — full reload**: fallback for what A/B can't resolve (new imports, changed dependencies, an unrecoverable error). Same CDP `Page.reload` mechanism stabilized in the old version's 0.0.9, rewritten on the new core.
 
-**Carried over as code, not yet device-verified**: gestures (`src/apply-patch.js`'s `Op.SetGestureDetector`) and Lynx's native virtualized `<list>` exist in this rewrite. The new arena-claim gesture path is explicitly unverified on a real device (see the note in `apply-patch.js`).
+**Carried over as code, not yet device-verified**: gestures (`src/apply-patch.js`'s `Op.SetGestureDetector`). The new arena-claim gesture path is explicitly unverified on a real device (see the note in `apply-patch.js`). The native `<list>` below is device-verified.
 
 **Native `<list>` (3.0.0+)**: `list` and `list-item` are ordinary Mithril elements — render them like any other, key the items, and Mithril's own keyed diff drives the native list:
 
@@ -25,7 +34,7 @@ m("list", { "list-type": "single", "span-count": 1, "scroll-orientation": "verti
   items.map((it) => m("list-item", { key: it.id, "item-key": it.id }, row(it))))
 ```
 
-Every documented `<list>` attribute (`bounces`, `item-snap`, `sticky`, `update-animation`, …) and `<list-item>` attribute (`full-span`, `sticky-top`/`-bottom`, `estimated-main-axis-size-px`, `reuse-identifier`, `recyclable`) is passed with its real type — booleans and objects included (`src/list-attributes.js` is the catalog). Events use the usual `on*` attrs (`onscroll`, `onscrolltoupper`, `onscrolltolower`, `onscrollstatechange`, `onlayoutcomplete`, `onsnap`); methods (`scrollToPosition`, `scrollBy`, `autoScroll`, `getVisibleCells`) go through a selector query on the list's `id`. `item-key` must be unique and stable — use the same value as `key`. **Known gap:** `update-animation="default"` is not safe yet on lists that remove on-screen items — see [`UPDATE_ANIMATION_GAP.md`](./UPDATE_ANIMATION_GAP.md). The main-thread side (`src/list-runtime.js`) follows @lynx-js/react's element-template list: each item keeps its own element tree and is attached only when native asks for it. 3.0.0 removes the previous `Op.CreateList`/`Op.SetListItems` protocol and the `mithril-lynx/list-cell` / `mithril-lynx/list-support` entry points. **Deliberately not carried over at all (yet)**: the imperative ref helpers and the old stack-based `navigation` module. Those were real, device-verified capabilities in v1 — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
+Every documented `<list>` attribute (`bounces`, `item-snap`, `sticky`, `update-animation`, …) and `<list-item>` attribute (`full-span`, `sticky-top`/`-bottom`, `estimated-main-axis-size-px`, `reuse-identifier`, `recyclable`) is passed with its real type — booleans and objects included (`src/list-attributes.js` is the catalog). Events use the usual `on*` attrs (`onscroll`, `onscrolltoupper`, `onscrolltolower`, `onscrollstatechange`, `onlayoutcomplete`, `onsnap`); methods (`scrollToPosition`, `scrollBy`, `autoScroll`, `getVisibleCells`) are called with `vnode.dom.invoke(method, params)` (see "Forms and native element methods"), or a selector query on the list's `id`. `item-key` must be unique and stable — use the same value as `key`. **Known gap:** `update-animation="default"` is not safe yet on lists that remove on-screen items — see [`UPDATE_ANIMATION_GAP.md`](./UPDATE_ANIMATION_GAP.md). The main-thread side (`src/list-runtime.js`) follows @lynx-js/react's element-template list: each item keeps its own element tree and is attached only when native asks for it. 3.0.0 removes the previous `Op.CreateList`/`Op.SetListItems` protocol and the `mithril-lynx/list-cell` / `mithril-lynx/list-support` entry points. **Deliberately not carried over at all (yet)**: the old stack-based `navigation` module (in-memory `route` plus the opt-in Android back button cover navigation — see [`ROUTE.md`](./ROUTE.md)); v1's imperative ref helpers are replaced by `vnode.dom.invoke()`/`focus()`/`blur()`. Those were real, device-verified capabilities in v1 — this rewrite's scope so far is specifically the redraw/reload core plus routing and networking (see below). Reimplementing the rest on this core is future work, not something this rewrite claims to already cover.
 
 ## Usage
 
@@ -62,6 +71,10 @@ renderApp({ root: () => m(Counter) });
 ## Networking
 
 `m.request`, reimplemented as a wrapper over Lynx's own `fetch`. See [`REQUEST.md`](./REQUEST.md) for the full API, and [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md) for the complete option-by-option gap analysis against the real `m.request` spec, backed by real-device evidence rather than docs/types alone (which were wrong twice during that investigation).
+
+## Forms and native element methods
+
+`m("input", { value, autofocus: true, oninput })` works as on the web: `value` is sent with the native `setValue` method only when it differs from what the field holds (text the user typed is never echoed back), `autofocus` focuses once on creation, and every element's `vnode.dom` has `focus()`, `blur()` and a promise-based `invoke(method, params)` for native UI methods — no `id`, `setTimeout` or `createSelectorQuery()`. See [`INPUT.md`](./INPUT.md).
 
 ## Custom fonts
 

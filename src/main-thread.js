@@ -75,7 +75,7 @@ export function setupRenderer() {
 		const page = __CreatePage("0", 0);
 		const pageId = __GetElementUniqueID(page);
 		applier = createPatchApplier(pageId, {
-			onEvent: (id, type, nativeEvent) => sendEventToBackground(id, type, nativeEvent),
+			onEvent: (id, type, nativeEvent, seq) => sendEventToBackground(id, type, nativeEvent, seq),
 		});
 		applier.registerPageRoot(page);
 		pageReady = true;

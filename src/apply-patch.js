@@ -22,7 +22,7 @@
 // allows (§2 non-goals) — the bug this rewrite fixes lives in the
 // commit/reload layer (commit.js, reload/*.js), never in this mapping.
 
-import { Op } from "./patch-protocol.js";
+import { FORM_FIELD_TAGS, INVOKE_RESULT_EVENT, Op } from "./patch-protocol.js";
 import { LIST_ITEM_VIRTUAL_ATTRIBUTES } from "./list-attributes.js";
 import { createListRuntime, isListItemPlatformAttribute } from "./list-runtime.js";
 
@@ -251,7 +251,11 @@ function registerGestureDetector(handle, id, gestureId, gestureType, arenaPolicy
  *   page this applier is attached to. Every element this applier creates
  *   belongs to that one page — see CONTRACT.md / lynx-mithril-shim.js.
  * @param {object} [options]
- * @param {Function} [options.onEvent]
+ * @param {(id: number, type: string, payload: unknown, seq?: number) => void} [options.onEvent] -
+ *   Forwards a native event to the background thread. `seq` is set for
+ *   events of an <input>/<textarea>: the number of native `input` events
+ *   that field has fired so far (see Op.SetInputValue). Also carries
+ *   Op.InvokeUIMethod results, as `INVOKE_RESULT_EVENT` events on id 0.
  * @param {boolean} [options.flush] - Whether `applyPatch` calls the bare,
  *   whole-page `__FlushElementTree()` after applying its ops. Defaults to
  *   `true` — the right default for the ONE real top-level applier per page
@@ -296,6 +300,29 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	const childrenOf = new Map(); // parent id -> Set<child id>
 	const parentOf = new Map(); // child id -> parent id
 
+	// <input>/<textarea> id -> { seq, value, composing }:
+	// - `value`/`composing`: the text (and IME state) JS last knew the field
+	//   to hold — from its last forwarded `input` event or the last setValue
+	//   run here. A native `input` event that doesn't change them is not
+	//   forwarded: native fires such events by itself (a <textarea> fires
+	//   `input ""` while it is first flushed; every setValue is echoed back
+	//   as an `input`), and on the web an `input` event only means the user
+	//   changed the text. Forwarding them would hand the app a spurious ""
+	//   at creation — wiping a controlled field's state.
+	// - `seq`: how many text-changing `input` events it has fired. Forwarded
+	//   with every event of the field, echoed back by the background in
+	//   Op.SetInputValue: a value computed before the latest keystroke is
+	//   stale and dropped (the keystroke's own event re-renders), which keeps
+	//   a programmatic value from overwriting text the user typed meanwhile —
+	//   the job lynx-ui's Input does with a main-thread readonly lock.
+	const fields = new Map();
+
+	// Op.InvokeUIMethod / Op.SetInputValue calls of the current patch, in op
+	// order. They run after the patch's flush: a UI method needs the native
+	// element to exist, and an element created by this same patch only does
+	// once the element tree has been flushed.
+	let pendingInvokes = [];
+
 	/**
 	 * Drops every per-id entry for `id` and all of its known descendants.
 	 * Iterative (explicit stack) so a deep subtree can't overflow the call
@@ -318,6 +345,7 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 			}
 			parentOf.delete(current);
 			handles.delete(current);
+			fields.delete(current);
 			eventListeners.delete(current);
 			itemInfo.delete(current);
 			const list = lists.get(current);
@@ -382,6 +410,53 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 	}
 
 	/**
+	 * Sends an Op.InvokeUIMethod result back to the background thread.
+	 * @param {number} callbackId - The background's callback id (never 0).
+	 * @param {number} code - `0` on success, the native error code otherwise.
+	 * @param {unknown} data - The method's result, or the error detail.
+	 * @returns {void}
+	 */
+	function sendInvokeResult(callbackId, code, data) {
+		onEvent?.(0, INVOKE_RESULT_EVENT, { callbackId, code, data });
+	}
+
+	/**
+	 * Runs the UI method calls queued by the patch just applied, in op order.
+	 * A call whose element was removed by the same patch is skipped (and its
+	 * caller told so); a SetInputValue made stale by a newer keystroke is
+	 * dropped.
+	 * @returns {boolean} Whether any native method was called.
+	 */
+	function runPendingInvokes() {
+		if (pendingInvokes.length === 0) return false;
+		const calls = pendingInvokes;
+		pendingInvokes = [];
+		let invoked = false;
+		for (const call of calls) {
+			const handle = handles.get(call.id);
+			if (handle == null) {
+				if (call.callbackId) sendInvokeResult(call.callbackId, -1, "mithril-lynx: the element was removed before the UI method could run");
+				continue;
+			}
+			const field = call.seq !== undefined ? fields.get(call.id) : undefined;
+			if (field != null) {
+				if (call.seq < field.seq) continue;
+				field.value = call.params.value;
+			}
+			if (typeof __InvokeUIMethod !== "function") {
+				if (call.callbackId) sendInvokeResult(call.callbackId, -1, "mithril-lynx: __InvokeUIMethod is not available on this runtime");
+				continue;
+			}
+			const callbackId = call.callbackId;
+			__InvokeUIMethod(handle, call.method, call.params ?? {}, (res) => {
+				if (callbackId) sendInvokeResult(callbackId, res?.code ?? 0, res?.data);
+			});
+			invoked = true;
+		}
+		return invoked;
+	}
+
+	/**
 	 * Applies one commit's worth of ops, then — unless this applier was
 	 * created with `flush: false` (see this function's own constructor
 	 * options above) — flushes exactly once with the bare, whole-page
@@ -407,6 +482,7 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 						break;
 					}
 					if (tag === "list-item") itemInfo.set(id, {});
+					else if (FORM_FIELD_TAGS.includes(tag)) fields.set(id, { seq: 0, value: "", composing: false });
 					handles.set(id, createElementHandle(tag));
 					break;
 				}
@@ -550,7 +626,21 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					 * @returns {void}
 					 */
 					const listener = (nativeEvent) => {
-						onEvent?.(id, type, nativeEvent);
+						const field = fields.get(id);
+						if (field != null) {
+							if (type === "input") {
+								const detail = (nativeEvent && nativeEvent.detail) || {};
+								const value = typeof detail.value === "string" ? detail.value : field.value;
+								const composing = detail.isComposing === true;
+								if (value === field.value && composing === field.composing) return;
+								field.seq++;
+								field.value = value;
+								field.composing = composing;
+							}
+							onEvent?.(id, type, nativeEvent, field.seq);
+						} else {
+							onEvent?.(id, type, nativeEvent);
+						}
 					};
 					let byType = eventListeners.get(id);
 					if (byType == null) eventListeners.set(id, (byType = new Map()));
@@ -614,6 +704,21 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 					}
 					break;
 				}
+				case Op.InvokeUIMethod: {
+					const id = ops[i++];
+					const method = ops[i++];
+					const params = ops[i++];
+					const callbackId = ops[i++];
+					pendingInvokes.push({ id, method, params, callbackId });
+					break;
+				}
+				case Op.SetInputValue: {
+					const id = ops[i++];
+					const value = ops[i++];
+					const seq = ops[i++];
+					pendingInvokes.push({ id, method: "setValue", params: { value }, callbackId: 0, seq });
+					break;
+				}
 				default:
 					throw new Error(`[mithril-lynx] Unknown patch opcode: ${opcode}`);
 			}
@@ -626,6 +731,10 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		let detached = false;
 		for (const list of lists.values()) if (list.detachRemoved()) detached = true;
 		if (detached && flush) __FlushElementTree();
+		// UI methods run once the elements they target exist natively; a
+		// method's own UI changes are committed by one more flush (the same
+		// invoke-then-flush order as ReactLynx's main-thread Element.invoke()).
+		if (runPendingInvokes() && flush) __FlushElementTree();
 	}
 
 	return {
@@ -655,6 +764,8 @@ export function createPatchApplier(pageId, { onEvent, flush = true } = {}) {
 		dispose() {
 			for (const list of lists.values()) list.destroy();
 			lists.clear();
+			fields.clear();
+			pendingInvokes = [];
 		},
 	};
 }

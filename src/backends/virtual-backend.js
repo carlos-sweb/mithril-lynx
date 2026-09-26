@@ -10,13 +10,13 @@ import { Op, pushOp } from "../patch-protocol.js";
 
 /**
  * Creates the background-thread patch backend: every call appends one op to a flat buffer.
- * @returns {{allocId: () => number, createElement: (tag: string) => number, createElementNS: (ns: string, tag: string) => number, createText: (text: string) => number, insertBefore: (parentId: number, childId: number, refId?: number) => void, removeChild: (parentId: number, childId: number) => void, setAttribute: (id: number, name: string, value: *) => void, removeAttribute: (id: number, name: string) => void, setAttributeNS: (id: number, ns: string|null, name: string, value: string|null) => void, setClasses: (id: number, value: string) => void, setStyleProperty: (id: number, name: string, value: string) => void, removeStyleProperty: (id: number, name: string) => void, setText: (id: number, value: string) => void, addEvent: (id: number, type: string) => void, removeEvent: (id: number, type: string) => void, setGestureDetector: (id: number, gestureId: number, gestureType: string, arenaPolicy: string) => void, removeGestureDetector: (id: number, gestureId: number) => void, takeOps: () => unknown[]|null}} The backend object.
+ * @returns {{allocId: () => number, createElement: (tag: string) => number, createElementNS: (ns: string, tag: string) => number, createText: (text: string) => number, insertBefore: (parentId: number, childId: number, refId?: number) => void, removeChild: (parentId: number, childId: number) => void, setAttribute: (id: number, name: string, value: *) => void, removeAttribute: (id: number, name: string) => void, setAttributeNS: (id: number, ns: string|null, name: string, value: string|null) => void, setClasses: (id: number, value: string) => void, setStyleProperty: (id: number, name: string, value: string) => void, removeStyleProperty: (id: number, name: string) => void, setText: (id: number, value: string) => void, addEvent: (id: number, type: string) => void, removeEvent: (id: number, type: string) => void, setGestureDetector: (id: number, gestureId: number, gestureType: string, arenaPolicy: string) => void, removeGestureDetector: (id: number, gestureId: number) => void, invokeUIMethod: (id: number, method: string, params: Object, callbackId: number) => void, setInputValue: (id: number, value: string, seq: number) => void, onUIMethodOp: (() => void)|null, takeOps: () => unknown[]|null}} The backend object.
  */
 export function createVirtualBackend() {
 	let nextId = 1;
 	let ops = [];
 
-	return {
+	const backend = {
 		// Exposed for tests that want to assert on id allocation directly;
 		// application code should never need it.
 		/**
@@ -167,6 +167,33 @@ export function createVirtualBackend() {
 		removeGestureDetector(id, gestureId) {
 			pushOp(ops, Op.RemoveGestureDetector, id, gestureId);
 		},
+		/**
+		 * Records a native UI method call (Op.InvokeUIMethod).
+		 * @param {number} id - Element id.
+		 * @param {string} method - UI method name.
+		 * @param {Object} params - Its parameters.
+		 * @param {number} callbackId - `0` for none, else the document's pending-invoke id.
+		 * @returns {void}
+		 */
+		invokeUIMethod(id, method, params, callbackId) {
+			pushOp(ops, Op.InvokeUIMethod, id, method, params, callbackId);
+			backend.onUIMethodOp?.();
+		},
+		/**
+		 * Records an <input>/<textarea> value change (Op.SetInputValue).
+		 * @param {number} id - Element id.
+		 * @param {string} value - The new text.
+		 * @param {number} seq - The field's input-event count when the value was computed.
+		 * @returns {void}
+		 */
+		setInputValue(id, value, seq) {
+			pushOp(ops, Op.SetInputValue, id, value, seq);
+			backend.onUIMethodOp?.();
+		},
+		/** Called after a UI method op is recorded — set by renderApp() to
+		 * flush calls made outside a render pass (a timer, a promise), which
+		 * no render would otherwise commit. */
+		onUIMethodOp: null,
 		/** Drains and returns the accumulated ops. Called once per commit. */
 		takeOps() {
 			if (ops.length === 0) return null;
@@ -175,4 +202,5 @@ export function createVirtualBackend() {
 			return out;
 		},
 	};
+	return backend;
 }

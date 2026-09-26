@@ -6,6 +6,16 @@
 import route from "mithril-lynx/route";
 ```
 
+**Changed in 3.0.0:**
+- **Breaking:** `route.set()` is asynchronous, as in Mithril (see "Navigating").
+- A changed `:key` param recreates the page.
+- `options.state` is supported.
+- `route.Link` runs its lifecycle hooks once, honors `e.preventDefault()` and accepts a `{ handleEvent }` object.
+- `route.get()` returns the decoded path.
+- New: `route.canGoBack()` and `route.listenBackButton()` (see "Android back button").
+
+[`ROUTE_CONTRACT_ANALYSIS.md`](./ROUTE_CONTRACT_ANALYSIS.md) has the details.
+
 ## Setup
 
 ```js
@@ -153,4 +163,4 @@ m(route.Link, { href: "/detail/:id", params: { id: 42 } }, [
 
 ## Device verification
 
-Navigation (Home → Detail with param interpolation, `route.Link` taps, `back()`/`forward()`), hot-reload while sitting on a non-default route (`module.hot.accept` + `route.set(route.get(), null, { replace: true })` to re-resolve after swapping a screen module), and confirmation that navigating away tears down the previous screen's nodes cleanly (via real patch ops, not CDP node ids, which are not stable identity across separate `DOM.getDocument()` calls) were covered on a real Android device before 3.0.0. The asynchronous `set()`, the parity fixes and `listenBackButton()` are covered by unit tests (`test/route.test.ts`); their device check is pending.
+Navigation (Home → Detail with param interpolation, `route.Link` taps, `back()`/`forward()`), hot-reload while sitting on a non-default route (`module.hot.accept` + `route.set(route.get(), null, { replace: true })` to re-resolve after swapping a screen module), and confirmation that navigating away tears down the previous screen's nodes cleanly (via real patch ops, not CDP node ids, which are not stable identity across separate `DOM.getDocument()` calls) were covered on a real Android device before 3.0.0. The asynchronous `set()`, the parity fixes and `listenBackButton()` are covered by unit tests (`test/route.test.ts`). The back button was checked on the same device with a real app (`non-contact`, a debug build wired as in "Android back button" above): back on the first screen closes the app, back on a pushed screen returns to the previous one, and an in-app `route.back()` updates `canGoBack` so the next system back closes the app.

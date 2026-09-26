@@ -26,6 +26,7 @@
 // applier".
 
 import { TYPED_ATTRIBUTES_BY_TAG } from "./list-attributes.js";
+import { FORM_FIELD_TAGS } from "./patch-protocol.js";
 
 const DASH_CASE = /-/;
 
@@ -290,8 +291,10 @@ export class LynxElement extends LynxContainerNode {
 		this._listeners = Object.create(null);
 		// `hasPropertyKey` (CONTRACT.md §e) requires `"value" in vnode.dom` etc.
 		// to be true for the property-write fast path to apply to form
-		// elements — plain own properties satisfy the `in` check.
-		this.value = undefined;
+		// elements — plain own properties satisfy the `in` check. An
+		// <input>/<textarea> has a real `value` accessor on its prototype
+		// (LynxFormFieldElement), which an own property would shadow.
+		if (!("value" in this)) this.value = undefined;
 		this.checked = undefined;
 		this.selectedIndex = undefined;
 	}
@@ -519,16 +522,165 @@ export class LynxElement extends LynxContainerNode {
 	}
 
 	/**
-	 * No-op by design: focus is managed by the native platform.
+	 * Calls one of the native element's UI methods (`focus`, `getValue`,
+	 * `scrollTo`, `autoScroll`, …) — the promise form of
+	 * `lynx.createSelectorQuery().select(…).invoke({ method, params })`,
+	 * without an `id` or a timer. The call travels with the next patch and
+	 * runs on the main thread right after that patch is flushed, so it is
+	 * safe from `oncreate`, when the element does not exist natively yet.
+	 * Called outside a render (a timer, a promise), it is sent on its own
+	 * within the same tick.
+	 * @param {string} method - The UI method name.
+	 * @param {Object} [params] - The method's parameters.
+	 * @returns {Promise<unknown>} Resolves with the method's result; rejects
+	 *   with an `Error` carrying the native `code` and `data`, or when the
+	 *   element is removed before the call could run.
+	 */
+	invoke(method, params) {
+		return new Promise((resolve, reject) => {
+			const callbackId = this.ownerDocument._registerInvoke(method, resolve, reject);
+			this._backend.invokeUIMethod(this._id, method, params ?? {}, callbackId);
+		});
+	}
+
+	/**
+	 * Fire-and-forget UI method call, for methods whose result nobody reads.
+	 * @param {string} method - The UI method name.
+	 * @returns {void}
+	 */
+	_invokeAndForget(method) {
+		this._backend.invokeUIMethod(this._id, method, {}, 0);
+	}
+
+	/**
+	 * Focuses the element (the native `focus` UI method). Like `invoke()`,
+	 * it runs once the current patch is applied, so it works from `oncreate`.
+	 * Mithril's own post-render focus restoration never calls this: the
+	 * fake document has no `activeElement` (see render.js's `render()`).
 	 * @returns {void}
 	 */
 	focus() {
-		// Native `<input>` focus on Lynx is managed by the platform, not by
-		// a JS `.focus()` call reaching into the render pipeline — calling
-		// into the backend here would mean patch application could disturb
-		// focus mid-keystroke, which is the exact failure mode
-		// mithril-lynx v1 was designed around (its `<input>` deliberately
-		// has no bound `value` for the same reason). No-op by design.
+		this._invokeAndForget("focus");
+	}
+
+	/**
+	 * Removes focus from the element (the native `blur` UI method).
+	 * @returns {void}
+	 */
+	blur() {
+		this._invokeAndForget("blur");
+	}
+}
+
+/**
+ * An `<input>` or `<textarea>`. Native has no `value` attribute, only UI
+ * methods, so `value` here is a real property: assigning a different value
+ * sends a `setValue` call (Op.SetInputValue), and every forwarded event of
+ * the field syncs it back from `detail.value` — exactly what a browser's
+ * input does. That makes Mithril's own form handling work unchanged:
+ * render.js skips writing a `value` equal to `dom.value`, so the text the
+ * user just typed is never sent back, while a value the app changed (a
+ * clear, an uppercase transform) is sent once.
+ */
+class LynxFormFieldElement extends LynxElement {
+	constructor(ownerDocument, backend, tag, ns) {
+		super(ownerDocument, backend, tag, ns);
+		this._value = "";
+		// How many native `input` events the main thread had counted when the
+		// last synced event was sent — echoed in Op.SetInputValue so a value
+		// computed before a newer keystroke is dropped (see apply-patch.js).
+		this._inputSeq = 0;
+		this._selectionStart = -1;
+		this._selectionEnd = -1;
+		this._autofocused = false;
+	}
+
+	/**
+	 * The field's current text, as last seen from native or set here.
+	 * @returns {string}
+	 */
+	get value() {
+		return this._value;
+	}
+
+	/**
+	 * Sets the field's text; `null`/`undefined` clears it. Nothing is sent
+	 * when it already holds that text.
+	 * @param {*} value - The new text, coerced with `String()`.
+	 */
+	set value(value) {
+		const text = value == null ? "" : String(value);
+		if (text === this._value) return;
+		this._value = text;
+		this._backend.setInputValue(this._id, text, this._inputSeq);
+	}
+
+	/**
+	 * Selection start from the last forwarded event, `-1` when unknown.
+	 * @returns {number}
+	 */
+	get selectionStart() {
+		return this._selectionStart;
+	}
+
+	/** Read-only: ignored (a `selectionStart` attribute has no meaning here). */
+	set selectionStart(_value) {}
+
+	/**
+	 * Selection end from the last forwarded event, `-1` when unknown.
+	 * @returns {number}
+	 */
+	get selectionEnd() {
+		return this._selectionEnd;
+	}
+
+	/** Read-only: ignored (a `selectionEnd` attribute has no meaning here). */
+	set selectionEnd(_value) {}
+
+	/**
+	 * Whether the field was focused on creation by `autofocus`.
+	 * @returns {boolean}
+	 */
+	get autofocus() {
+		return this._autofocused;
+	}
+
+	/**
+	 * `autofocus: true` focuses the field once, when it is created — the
+	 * HTML attribute's semantics (Lynx has no such attribute). Later
+	 * redraws, or toggling it, never focus it again.
+	 * @param {*} value - Truthy to focus.
+	 */
+	set autofocus(value) {
+		if (!value || this._autofocused) return;
+		this._autofocused = true;
+		this.focus();
+	}
+
+	/**
+	 * Selects a range of the field's text (the native `setSelectionRange` UI method).
+	 * @param {number} selectionStart - Start index.
+	 * @param {number} selectionEnd - End index.
+	 * @returns {Promise<unknown>}
+	 */
+	setSelectionRange(selectionStart, selectionEnd) {
+		return this.invoke("setSelectionRange", { selectionStart, selectionEnd });
+	}
+
+	/**
+	 * Syncs `value`, the selection and the input sequence from a forwarded
+	 * native event, before its handlers run. Silent: nothing is sent.
+	 * @param {{detail?: {value?: unknown, selectionStart?: unknown, selectionEnd?: unknown}}} payload - The native event.
+	 * @param {number} [seq] - The field's native `input` event count.
+	 * @returns {void}
+	 */
+	_syncFromEvent(payload, seq) {
+		if (typeof seq === "number") this._inputSeq = seq;
+		const detail = payload && payload.detail;
+		if (detail == null) return;
+		if (typeof detail.value === "string") this._value = detail.value;
+		if (typeof detail.selectionStart === "number") this._selectionStart = detail.selectionStart;
+		if (typeof detail.selectionEnd === "number") this._selectionEnd = detail.selectionEnd;
 	}
 }
 
@@ -696,6 +848,43 @@ export class LynxDocument extends LynxContainerNode {
 		 * event targets, fragments have no id at all, and the document itself
 		 * (id 0) is not registered either. */
 		this._nodesById = new Map();
+		// callbackId -> pending `invoke()` promise, settled by resolveInvoke().
+		this._invokeCallbacks = new Map();
+		this._nextCallbackId = 1;
+	}
+
+	/**
+	 * Registers a pending `invoke()` promise.
+	 * @param {string} method - The UI method name, for the error message.
+	 * @param {(data: unknown) => void} resolve - Settles it successfully.
+	 * @param {(error: Error) => void} reject - Settles it with an error.
+	 * @returns {number} The callback id to send with Op.InvokeUIMethod.
+	 */
+	_registerInvoke(method, resolve, reject) {
+		const callbackId = this._nextCallbackId++;
+		this._invokeCallbacks.set(callbackId, { method, resolve, reject });
+		return callbackId;
+	}
+
+	/**
+	 * Settles a pending `invoke()` with the result forwarded by the main
+	 * thread. Unknown ids are ignored.
+	 * @param {{callbackId: number, code: number, data: unknown}} result - The result.
+	 * @returns {void}
+	 */
+	resolveInvoke(result) {
+		const pending = result && this._invokeCallbacks.get(result.callbackId);
+		if (pending == null) return;
+		this._invokeCallbacks.delete(result.callbackId);
+		if (result.code === 0) {
+			pending.resolve(result.data);
+			return;
+		}
+		const detail = typeof result.data === "string" ? result.data : JSON.stringify(result.data);
+		const error = new Error(`[mithril-lynx] UI method "${pending.method}" failed (code ${result.code}): ${detail}`);
+		error.code = result.code;
+		error.data = result.data;
+		pending.reject(error);
 	}
 
 	/**
@@ -733,6 +922,7 @@ export class LynxDocument extends LynxContainerNode {
 	 */
 	createElement(tag) {
 		if (tag in TYPED_ATTRIBUTES_BY_TAG) return new (typedElementClassFor(tag))(this, this._backend, tag, undefined);
+		if (FORM_FIELD_TAGS.includes(tag)) return new LynxFormFieldElement(this, this._backend, tag, undefined);
 		return new LynxElement(this, this._backend, tag, undefined);
 	}
 

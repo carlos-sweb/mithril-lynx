@@ -21,6 +21,25 @@
 
 export { createPatchApplier } from "./apply-patch.js";
 
+/** Every `__InvokeUIMethod` call made through the stand-in below, in order
+ * (`{ element, method, params }`) — module-level, so it survives the testing
+ * environment re-injecting the main-thread globals. Clear it with
+ * `uiMethodCalls.length = 0`. */
+export const uiMethodCalls = [];
+
+let uiMethodResponder = null;
+
+/**
+ * Sets how the `__InvokeUIMethod` stand-in answers: `responder(element,
+ * method, params)` returns the `{ code, data }` passed to the callback.
+ * `null` (the default) answers `{ code: 0, data: undefined }` to every call.
+ * @param {((element: unknown, method: string, params: Object) => {code: number, data?: unknown})|null} responder - The responder.
+ * @returns {void}
+ */
+export function setUIMethodResponder(responder) {
+	uiMethodResponder = responder;
+}
+
 /**
  * Installs the polyfill on the main-thread globals object
  * @lynx-js/testing-environment hands to onInjectMainThreadGlobals. Scoped
@@ -76,5 +95,22 @@ export function installTestingPolyfills(target) {
 			);
 		}
 		node.__vanillaListeners?.[name]?.delete(handler);
+	};
+
+	// Stand-in for the native `__InvokeUIMethod` PAPI (element, method,
+	// params, callback), which the testing environment lacks: records the
+	// call and answers synchronously (native answers later; nothing in
+	// mithril-lynx depends on either timing).
+	/**
+	 * Stand-in for the native `__InvokeUIMethod` PAPI.
+	 * @param {Object} element - The element.
+	 * @param {string} method - The UI method name.
+	 * @param {Object} params - Its parameters.
+	 * @param {(res: {code: number, data?: unknown}) => void} callback - Receives the result.
+	 * @returns {void}
+	 */
+	target.__InvokeUIMethod = (element, method, params, callback) => {
+		uiMethodCalls.push({ element, method, params });
+		callback(uiMethodResponder ? uiMethodResponder(element, method, params) : { code: 0, data: undefined });
 	};
 }

@@ -35,8 +35,10 @@ export function sendPatchToMainThread(ops) {
 	lynx.getCoreContext().dispatchEvent({ type: patchEventName, data: [PROTOCOL_VERSION, ...ops] });
 }
 
-/** Background thread: receive a forwarded native event `{ id, type, payload }`.
- * @param {(event: {data: {id: number, type: string, payload: unknown}}) => void} handler - Called for every forwarded event.
+/** Background thread: receive a forwarded native event `{ id, type, payload, seq? }`
+ * (`seq`: see apply-patch.js's `fields`), or an Op.InvokeUIMethod result
+ * (`type` = `INVOKE_RESULT_EVENT`, see patch-protocol.js).
+ * @param {(event: {data: {id: number, type: string, payload: unknown, seq?: number}}) => void} handler - Called for every forwarded event.
  * @returns {void}
  */
 export function onEventFromMainThread(handler) {
@@ -55,8 +57,10 @@ export function onPatchFromBackground(handler) {
  * @param {number} id - The element id.
  * @param {string} type - The event type.
  * @param {unknown} payload - The native event payload.
+ * @param {number} [seq] - For an <input>/<textarea>, its native `input` event count.
  * @returns {void}
  */
-export function sendEventToBackground(id, type, payload) {
-	lynx.getJSContext().dispatchEvent({ type: eventFromMainThreadEventName, data: { id, type, payload } });
+export function sendEventToBackground(id, type, payload, seq) {
+	const data = seq === undefined ? { id, type, payload } : { id, type, payload, seq };
+	lynx.getJSContext().dispatchEvent({ type: eventFromMainThreadEventName, data });
 }

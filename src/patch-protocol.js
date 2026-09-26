@@ -21,13 +21,14 @@
  * could otherwise re-interpret a reordered opcode silently — a version
  * mismatch throws instead of corrupting the mirrored id space.
  *
- * The value is deliberately outside the 0..15 opcode range (0x4d4c was "ML"
+ * The value is deliberately outside the opcode range (0x4d4c was "ML"
  * in ASCII; bumped to 0x4d4d in 3.0.0, when the Op.CreateList /
  * Op.SetListItems list protocol was replaced by plain `list`/`list-item`
- * elements) so a versioned array can never be misread as an op sequence if
+ * elements, and to 0x4d4e, also in 3.0.0, when Op.InvokeUIMethod /
+ * Op.SetInputValue were added) so a versioned array can never be misread as an op sequence if
  * it is ever fed to `applyPatch()` without the strip.
  */
-export const PROTOCOL_VERSION = 0x4d4d;
+export const PROTOCOL_VERSION = 0x4d4e;
 
 export const Op = Object.freeze({
 	CreateElement: 0,
@@ -58,7 +59,29 @@ export const Op = Object.freeze({
 	// background-thread side.
 	SetGestureDetector: 14, // id, gestureId, gestureType, arenaPolicy
 	RemoveGestureDetector: 15, // id, gestureId
+	// Calls a native UI method (`focus`, `getValue`, `scrollTo`, …) through
+	// the main-thread `__InvokeUIMethod` PAPI — the path ReactLynx's
+	// main-thread `Element.invoke()` uses. Deferred until after the patch's
+	// `__FlushElementTree()`, so an element created by the same patch
+	// already exists natively. callbackId 0 = no result wanted; otherwise
+	// the result comes back as an INVOKE_RESULT_EVENT forwarded event.
+	InvokeUIMethod: 16, // id, method, params, callbackId
+	// `value` of an <input>/<textarea>: a `setValue` UI method call guarded
+	// by `seq`, the number of native `input` events the background had seen
+	// for this field when it computed the value. The main thread drops it
+	// when the user has typed since (a newer `input` event is in flight and
+	// will re-render) — see apply-patch.js.
+	SetInputValue: 17, // id, value, seq
 });
+
+/** The reserved forwarded-event type that carries an Op.InvokeUIMethod
+ * result (`{ callbackId, code, data }`) back to the background thread, over
+ * the same channel as native events. Never an element's own event type. */
+export const INVOKE_RESULT_EVENT = "mithrilLynx:invokeResult";
+
+/** Tags whose `value` is a native UI method call (Op.SetInputValue) rather
+ * than an attribute. */
+export const FORM_FIELD_TAGS = Object.freeze(["input", "textarea"]);
 
 /**
  * Encodes one op onto a flat ops array. Kept as a tiny helper (not a class)
@@ -95,6 +118,8 @@ export const OP_ARITY = Object.freeze({
 	[Op.RemoveEvent]: 2, // id, type
 	[Op.SetGestureDetector]: 4, // id, gestureId, gestureType, arenaPolicy
 	[Op.RemoveGestureDetector]: 2, // id, gestureId
+	[Op.InvokeUIMethod]: 4, // id, method, params, callbackId
+	[Op.SetInputValue]: 3, // id, value, seq
 });
 
 /** Walks a flat ops array, calling `visit(opcode, args)` once per op — args

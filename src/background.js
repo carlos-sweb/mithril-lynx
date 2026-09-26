@@ -30,6 +30,7 @@ import { createVirtualBackend } from "./backends/virtual-backend.js";
 import { createCommitController } from "./commit.js";
 import { onEventFromMainThread, sendPatchToMainThread } from "./channel.js";
 import { register as registerRedraw } from "./mount-redraw.js";
+import { INVOKE_RESULT_EVENT } from "./patch-protocol.js";
 
 /** Event types whose automatic redraw is coalesced to one per frame. Only
  * add types that fire continuously during one interaction (every sample of
@@ -82,6 +83,21 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread, subscribeEv
 	}
 	commitController.install(flush);
 
+	// A UI method call made outside a render pass (`dom.focus()` in a timer,
+	// `dom.invoke()` after a fetch) has no commit to travel with: send it at
+	// the end of the current task. Inside a render (or an event handler,
+	// which is followed by one) the render's own commit sends it first and
+	// this finds nothing left to send.
+	let uiFlushScheduled = false;
+	backend.onUIMethodOp = () => {
+		if (uiFlushScheduled) return;
+		uiFlushScheduled = true;
+		Promise.resolve().then(() => {
+			uiFlushScheduled = false;
+			flush();
+		});
+	};
+
 	// This is Mithril's actual redraw service pattern (the same shape as
 	// upstream `mithril/api/mount-redraw.js`'s internal `run()`): the
 	// "redraw" callback IS "call render() again", not "send a patch"
@@ -132,9 +148,16 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread, subscribeEv
 	// handler doesn't opt out. This is the ONLY consumer of
 	// `onEventFromMainThread` — app code never touches the channel directly.
 	subscribeEvents((event) => {
-		const { id, type, payload } = event.data;
+		const { id, type, payload, seq } = event.data;
+		if (type === INVOKE_RESULT_EVENT) {
+			document.resolveInvoke(payload);
+			return;
+		}
 		const node = document.getNodeById(id);
 		if (!node) return;
+		// An <input>/<textarea> learns its native value before any handler
+		// runs, as a browser input would (see fake-dom.js).
+		if (typeof node._syncFromEvent === "function") node._syncFromEvent(payload, seq);
 		dispatchingHighFrequency = HIGH_FREQUENCY_EVENTS.has(type);
 		try {
 			node.dispatchEvent({
