@@ -11,7 +11,7 @@ import { Op } from "../src/patch-protocol.js";
 // else. This test locks that in.
 
 describe("route.js + stable-host: a same-path re-resolve patches in place, never recreates", () => {
-	it("swapping the live-bound view (module.hot.accept's job) produces only a SetText, no Create/Remove", () => {
+	it("swapping the live-bound view (module.hot.accept's job) produces only a SetText, no Create/Remove", async () => {
 		lynxTestingEnv.switchToMainThread();
 		const capturedOps: unknown[][] = [];
 		lynx.getJSContext().addEventListener("MithrilLynx:Patch", (event: any) => {
@@ -32,6 +32,7 @@ describe("route.js + stable-host: a same-path re-resolve patches in place, never
 
 		currentDetail = { view: () => m("text", { key: "title" }, "second") };
 		route.set(route.get() as string, null, { replace: true });
+		await Promise.resolve(); // navigation resolves on the next microtask
 
 		const flat = capturedOps.flat();
 		expect(flat).not.toContain(Op.CreateElement);

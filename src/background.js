@@ -137,7 +137,19 @@ export function renderApp({ root, sendPatch = sendPatchToMainThread, subscribeEv
 		if (!node) return;
 		dispatchingHighFrequency = HIGH_FREQUENCY_EVENTS.has(type);
 		try {
-			node.dispatchEvent({ type, currentTarget: node, preventDefault() {}, stopPropagation() {}, ...payload });
+			node.dispatchEvent({
+				type,
+				currentTarget: node,
+				defaultPrevented: false,
+				// Lynx has no default action to cancel; recording the call lets
+				// handlers that check `e.defaultPrevented` (route.Link, like
+				// upstream m.route.Link) behave as on the web.
+				preventDefault() {
+					this.defaultPrevented = true;
+				},
+				stopPropagation() {},
+				...payload,
+			});
 		} finally {
 			dispatchingHighFrequency = false;
 		}
