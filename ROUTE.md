@@ -1,6 +1,6 @@
 # `mithril-lynx/route`
 
-`m.route`, reimplemented for an environment with no URL bar and no `window.history` — Lynx pages aren't URL-addressable, so there's nothing for a real `popstate`-based router to hook into. This is not a limitation specific to Mithril: it's why React Router ships `MemoryRouter` and Vue Router ships `createMemoryHistory()` for exactly this kind of environment. `route.js` follows the same pattern — an in-memory array standing in for the browser's session history — while keeping the rest of the real `m.route` API shape, so route-using view code doesn't need to be rewritten, just re-imported.
+`m.route`, reimplemented for an environment with no URL bar and no `window.history`. Lynx pages aren't URL-addressable, so there's nothing for a `popstate`-based router to hook into — which is why ReactLynx's documented routers do the same thing: React Router with `MemoryRouter`, TanStack Router with `createMemoryHistory()`. `route.js` keeps history in an in-memory array and otherwise follows the real `m.route` API and behavior (Mithril 2.3.8), so route-using view code only needs to be re-imported. [`ROUTE_CONTRACT_ANALYSIS.md`](./ROUTE_CONTRACT_ANALYSIS.md) has the full parity table.
 
 ```js
 import route from "mithril-lynx/route";
@@ -15,7 +15,7 @@ route("/", {
 });
 ```
 
-Unlike real Mithril, this call takes no `root` DOM argument — this package has exactly one `renderApp()` for the app's whole lifetime (see the main README's architecture section), so `route(...)` calls it internally the first time a route resolves. `defaultRoute` (`"/"` above) is both the fallback for an unmatched path **and** the screen the app starts on — there's no browser URL to read an initial path from, so this is the Lynx equivalent of React Router's `initialEntries={["/"]}`.
+Unlike real Mithril, this call takes no `root` DOM argument — this package has exactly one `renderApp()` for the app's whole lifetime, so `route(...)` calls it internally the first time a route resolves. `defaultRoute` (`"/"` above) is required: it's both the fallback for an unmatched path **and** the screen the app starts on (there's no browser URL to read an initial path from — the Lynx equivalent of React Router's `initialEntries={["/"]}`).
 
 Route values can be a plain component, or a resolver object with `onmatch`/`render`, exactly like real Mithril:
 
@@ -29,24 +29,105 @@ route("/", {
 });
 ```
 
-`route.SKIP` falls through to the next matching route, same as upstream.
+`route.SKIP` falls through to the next matching route. Route templates follow upstream's rules: they must start with `/`, and params must be separated by `/`, `.` or `-` (`/:a:b` throws a `SyntaxError`). A `:key` param works as in Mithril: when it changes, the page is recreated with fresh state.
 
 ## Navigating
 
 ```js
-route.set("/detail/:id", { id: 42 });   // pushes a new history entry
-route.set("/detail/:id", { id: 42 }, { replace: true }); // overwrites the current one
-route.get();                             // current resolved path, e.g. "/detail/42"
-route.param("id");                       // "42" — or route.param() for the whole params object
+route.set("/detail/:id", { id: 42 });                     // pushes a new history entry
+route.set("/detail/:id", { id: 42 }, { replace: true });  // overwrites the current one
+route.set("/detail/:id", { id: 42 }, { state: { from: "home" } }); // state is merged into params
+route.get();        // current path, decoded, e.g. "/detail/42"
+route.param("id");  // "42" — or route.param() for the whole params object
 ```
 
-`route.back()` / `route.forward()` walk the same in-memory history stack `route.set` writes to. **These do not exist on real Mithril** — they're new here because Lynx has no hardware/gesture "back" button exposed to JS (only app-lifecycle events like `onAppEnterBackground`, not navigation), so an app's own back affordance has to call something explicit. Wire a screen's back button to `route.back()`. Both return `true` when they navigated and `false` at the top/end of the stack (a silent no-op at the boundary), so a back/forward affordance can enable/disable itself from the return value.
+**`route.set()` is asynchronous, like `m.route`:** the history changes right away, but the new screen resolves on the next microtask, and several navigations in the same tick resolve only the last one. `route.get()` still returns the previous path until then. This is what makes a redirect from inside a render safe (e.g. `route.set("/login")` in a page's `oninit`).
 
-`route.prefix` exists only so app code defensively ported from a real Mithril app (`m.route.prefix = ""`) doesn't throw on import — there's no URL bar for a prefix to apply to, so setting it does nothing.
+`options.state` is stored with the history entry, merged into the route's params, and restored by `back()`/`forward()`. `options.title` is accepted and ignored.
+
+`route.back()` / `route.forward()` walk the same in-memory history. **These are not part of `m.route`** — there's no browser back button. Both return `true` when they navigated and `false` at the start/end of the stack, and `route.canGoBack()` tells whether `back()` would navigate, so a back affordance can enable itself.
+
+`route.prefix` exists only so code ported from a real Mithril app (`m.route.prefix = ""`) doesn't throw; it has no effect.
+
+## Android back button
+
+The system back button doesn't reach JS on its own (Lynx only exposes it inside an `<overlay>`, through `bindrequestclose`), so by default pressing back closes the app from any screen. `route.listenBackButton()` connects it, opt-in, through the same channel apps already use for host → JS events (`sendGlobalEvent` → `GlobalEventEmitter`):
+
+1. The host sends a global event when back is pressed, from an `OnBackPressedCallback` that starts **disabled**.
+2. JS calls `route.back()` when the event arrives.
+3. JS tells the host whether there's history to go back to (`onCanGoBackChange`); the host enables its callback only while there is. At the first screen the callback is disabled, so Android's default (closing the app) applies.
+
+Nothing blocks when this isn't set up: without the host part, the event never arrives; without the JS part, the callback stays disabled; without `GlobalEventEmitter`, it logs a warning and does nothing.
+
+**JS** (e.g. in `background.ts`, after `route(...)`):
+
+```js
+route.listenBackButton({
+  // eventName: "mithrilLynx:back",  // the default
+  onCanGoBackChange: (canGoBack) => NativeModules.NavModule?.setCanGoBack(canGoBack),
+});
+```
+
+It returns a function that stops listening (useful for HMR).
+
+**Android host** (Kotlin):
+
+```kotlin
+// MainActivity.kt
+import androidx.activity.OnBackPressedCallback
+import com.lynx.react.bridge.JavaOnlyArray
+
+class MainActivity : AppCompatActivity() {
+    companion object {
+        // Disabled until JS reports there is history to go back to.
+        var backCallback: OnBackPressedCallback? = null
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val builder = LynxViewBuilder()
+        builder.registerModule("NavModule", NavModule::class.java)
+        val lynxView = builder.build(this)
+        // ... load the bundle, setContentView(lynxView)
+
+        val callback = object : OnBackPressedCallback(false) {
+            override fun handleOnBackPressed() {
+                lynxView.sendGlobalEvent("mithrilLynx:back", JavaOnlyArray())
+            }
+        }
+        onBackPressedDispatcher.addCallback(this, callback)
+        backCallback = callback
+    }
+
+    override fun onDestroy() {
+        backCallback = null
+        super.onDestroy()
+    }
+}
+```
+
+```kotlin
+// NavModule.kt
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import com.lynx.jsbridge.LynxMethod
+import com.lynx.jsbridge.LynxModule
+
+class NavModule(context: Context) : LynxModule(context) {
+    @LynxMethod
+    fun setCanGoBack(canGoBack: Boolean) {
+        // Called from the JS thread; the callback must be touched on the UI thread.
+        Handler(Looper.getMainLooper()).post { MainActivity.backCallback?.isEnabled = canGoBack }
+    }
+}
+```
+
+Because the callback is only enabled while there's history, this also works with Android's predictive back gesture.
 
 ## Links
 
-Lynx has no `<a>`/`onclick` — `route.Link` renders a tap-driven element instead (the same shape ReactLynx's `useNavigate()` + `ontap` pattern and Vue Lynx's custom `RouterLink` slot use):
+Lynx has no `<a>`/`onclick` — `route.Link` renders a tap-driven element instead (the same shape as ReactLynx's `useNavigate()` + `bindtap` pattern):
 
 ```js
 m(route.Link, { href: "/detail/:id", params: { id: 42 } }, [
@@ -57,15 +138,19 @@ m(route.Link, { href: "/detail/:id", params: { id: 42 } }, [
 - `selector` picks the rendered tag (default `"view"`).
 - `params` interpolates into `href` the same way `route.set`'s second argument does.
 - `options` is passed straight through to the underlying `route.set` call (e.g. `{ replace: true }`).
-- `disabled: true` renders the element with no `ontap` at all, rather than an `ontap` that no-ops.
-- Your own `ontap` still runs first; returning `false` from it cancels the navigation (matches real Mithril's `m.route.Link` behavior).
+- `disabled: true` renders the element with no `ontap` at all.
+- Your own `ontap` runs first (a function or a `{ handleEvent }` object); returning `false` from it, or calling `e.preventDefault()`, cancels the navigation.
+- `key` and lifecycle hooks (`oncreate`, …) stay on the Link itself and aren't copied onto the rendered element, as in upstream.
 
 ## Known differences from real `m.route`
 
-- No `root` argument to the setup call (see "Setup" above) — architectural, not an oversight.
-- `route.back()`/`route.forward()` are new additions, not part of the real `m.route` API — see "Navigating" above for why Lynx needs them.
-- History is in-memory only: it does not survive a full app restart, and there is no deep-linking from outside the app (nothing external can set the initial path — it's always `defaultRoute`).
+- No `root` argument to the setup call, and `defaultRoute` is required (see "Setup").
+- `onclick` on a Link is `ontap` here (Lynx's tap event).
+- `back()`, `forward()`, `canGoBack()` and `listenBackButton()` are additions.
+- `route.prefix` has no effect; `options.title` is ignored.
+- History is in-memory only: it doesn't survive an app restart.
+- **Deep links aren't supported yet.** The host *can* pass data to a page (`initData` at `loadTemplate`, `updateData`, `globalProps`), but `route` doesn't read an initial path from it — the app always starts at `defaultRoute`. Tracked in `ROUTE_CONTRACT_ANALYSIS.md`.
 
 ## Device verification
 
-Navigation (Home → Detail with param interpolation, `route.Link` taps, `back()`/`forward()`), hot-reload while sitting on a non-default route (`module.hot.accept` + `route.set(route.get(), null, { replace: true })` to re-resolve after swapping a screen module), and confirmation that navigating away tears down the previous screen's nodes cleanly (via real patch ops — `Op.RemoveChild`/`Op.CreateElement`, not comparing CDP node ids, which are not stable identity across separate `DOM.getDocument()` calls) are all covered on a real connected Android device. See `.omo/plans/m-route-en-memoria.md` §4–§6 for the full research (how React Native/Vue-on-Lynx handle navigation) and the device evidence.
+Navigation (Home → Detail with param interpolation, `route.Link` taps, `back()`/`forward()`), hot-reload while sitting on a non-default route (`module.hot.accept` + `route.set(route.get(), null, { replace: true })` to re-resolve after swapping a screen module), and confirmation that navigating away tears down the previous screen's nodes cleanly (via real patch ops, not CDP node ids, which are not stable identity across separate `DOM.getDocument()` calls) were covered on a real Android device before 3.0.0. The asynchronous `set()`, the parity fixes and `listenBackButton()` are covered by unit tests (`test/route.test.ts`); their device check is pending.
