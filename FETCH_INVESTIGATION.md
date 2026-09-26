@@ -2,7 +2,8 @@
 
 Documento de referencia, no un plan — el plan que consumió esta
 investigación (con su narrativa de spikes y decisiones) está en
-[`.omo/plans/m-request-fetch-lynx.md`](.omo/plans/m-request-fetch-lynx.md).
+`.omo/plans/m-request-fetch-lynx.md` (retirado del árbol en `71a6670`; se lee con
+`git show 71a6670^:.omo/plans/m-request-fetch-lynx.md`).
 Este archivo es el consolidado técnico: qué es cada API, qué dice cada
 fuente, y qué se confirmó de verdad en un device real — para consultar
 sin tener que reconstruir la investigación de nuevo.
@@ -302,6 +303,6 @@ los 4-5 puntos sin equivalente, con una sugerencia directa de usar
 - `fetch` de Lynx (doc): <https://lynxjs.org/api/lynx-api/global/fetch.html>
 - Tipos reales: `@lynx-js/types/types/background-thread/{fetch,lynx}.d.ts`
 - Código fuente real de `m.request`: `node_modules/mithril/request/request.js`
-- Plan que usa esta investigación: [`.omo/plans/m-request-fetch-lynx.md`](.omo/plans/m-request-fetch-lynx.md)
+- Plan que usa esta investigación: `.omo/plans/m-request-fetch-lynx.md` (en el historial de git: `git show 71a6670^:.omo/plans/m-request-fetch-lynx.md`)
 - Implementación resultante: `src/request.js` (ver ese archivo para el
   estado actual de qué de esta tabla ya está construido)

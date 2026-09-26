@@ -19,7 +19,7 @@ The old implementation's core bugs all traced back to the same root cause: wheth
 
 - **One thread model, not three.** The old version had main-thread-owned, data-channel, and renderer modes. This one has exactly one: the real `mithril/render/render.js` (via [`mithril-runtime`](https://github.com/carlos-sweb/mithril-runtime)) always runs on the **background** thread against a virtual tree; the **main thread** only ever replays patches onto real Element PAPI nodes and forwards native events back. No app view code ever runs on the main thread.
 - **One explicit commit hook, not a conditional global.** `src/commit.js` installs exactly one commit callback per `renderApp()` lifetime, set up once by the code that owns the render. Asking to commit before one is installed throws immediately, on the same tick, with a message naming exactly what's missing — never a silently frozen screen.
-- **Three reload modes, correctly separated** (see `.omo/plans/mithril-lynx-v2-desde-cero.md` for the full device-verified story):
+- **Three reload modes, correctly separated** (the full device-verified story is in the rewrite plan — see "Reference docs"):
   - **A — data reload**: text/props/CSS edits. Already validated in the old version; rebuilt on the new core.
   - **B — structural reload**: adding/removing/reordering tree nodes. The old version assumed this *had* to be a full reload; this one lets Mithril's own real diff (running in the background against a real tree) produce the right Create/Insert/Remove ops instead — no separate wire-protocol mode needed, just reconciliation that doesn't discard nodes that didn't change.
   - **C — full reload**: fallback for what A/B can't resolve (new imports, changed dependencies, an unrecoverable error). Same CDP `Page.reload` mechanism stabilized in the old version's 0.0.9, rewritten on the new core.
@@ -88,7 +88,7 @@ Use a plain CSS `@font-face` rule — not `lynx.addFont()` (that JS API only fir
 
 - **`m.trust`** — not present. Stripped from `mithril-runtime` at the source, and Lynx's Element PAPI has no innerHTML-equivalent injection point to reimplement it against anyway (same permanent gap v1 documented).
 - **A handful of `m.request` options with no `fetch` equivalent** (`config`, `async: false`, `user`/`password`, `withCredentials`) throw immediately with a message pointing at `FETCH_INVESTIGATION.md`, rather than silently behaving differently — see `REQUEST.md`.
-- **The event object passed to handlers is a synthesized snapshot, not a live DOM event.** `preventDefault()` and `stopPropagation()` on it are no-ops, and events do not bubble — the fake DOM (`src/fake-dom.js`) dispatches directly to the single node the native event targeted. Code ported from the web that calls `e.preventDefault()` (e.g. form submit) will silently do nothing. `e.redraw = false` still works, and is how `route.Link` opts out of the post-tap redraw.
+- **The event object passed to handlers is a synthesized snapshot, not a live DOM event.** Lynx has no default actions: `preventDefault()` only sets `e.defaultPrevented` (which `route.Link` honors, as upstream does), and `stopPropagation()` is a no-op — events do not bubble; the fake DOM (`src/fake-dom.js`) dispatches directly to the single node the native event targeted. Code ported from the web that relies on `e.preventDefault()` stopping a browser action (e.g. form submit) has nothing to stop. `e.redraw = false` still works, and is how `route.Link` opts out of the post-tap redraw.
 
 ## Testing
 
@@ -96,12 +96,28 @@ Use a plain CSS `@font-face` rule — not `lynx.addFont()` (that JS API only fir
 npm test
 ```
 
-Runs against `@lynx-js/testing-environment`'s real Element PAPI simulation via `rstest` — `test/end-to-end.test.ts` and `test/structural-reload.test.ts` exercise real Mithril diff + real patch replay, not mocks. Device-only claims (focus/text surviving a structural reload on a real `<input>`, the three reload modes triggering correctly over a live dev session) are verified separately on a connected Android device and logged in `.omo/plans/mithril-lynx-v2-desde-cero.md` §8, not re-asserted here.
+Runs against `@lynx-js/testing-environment`'s real Element PAPI simulation via `rstest` — `test/end-to-end.test.ts` and `test/structural-reload.test.ts` exercise real Mithril diff + real patch replay, not mocks. Device-only claims (focus/text surviving a structural reload on a real `<input>`, the three reload modes triggering correctly over a live dev session) are verified separately on a connected Android device and logged in the rewrite plan's §8 (see "Reference docs"), not re-asserted here. Device checks of the 3.0.0 features are recorded in each feature's own doc (`INPUT.md`, `ROUTE.md`, `UPDATE_ANIMATION_GAP.md`).
 
 ## Reference docs
 
-- `.omo/plans/mithril-lynx-v2-desde-cero.md` — the full rewrite plan: architecture decisions, the three reload modes' device verification, and the postmortem on exactly what v1 got wrong.
-- `.omo/plans/m-route-en-memoria.md` — how `m.route` was designed and verified for an in-memory, URL-less environment.
-- `.omo/plans/m-request-fetch-lynx.md` — the `m.request`-vs-`fetch` investigation plan and its execution log.
-- [`ROUTE.md`](./ROUTE.md), [`REQUEST.md`](./REQUEST.md), [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md) — user-facing reference docs for the two Lynx-specific reimplementations.
+User-facing:
+
+- [`CHANGELOG.md`](./CHANGELOG.md) — what changed in each release, breaking changes first.
+- [`ROUTE.md`](./ROUTE.md) — `mithril-lynx/route`: the in-memory `m.route`, asynchronous `set()`, `route.Link`, and the opt-in Android back button with its Kotlin host recipe.
+- [`INPUT.md`](./INPUT.md) — `<input>`/`<textarea>` (`value`, `autofocus`) and `vnode.dom.invoke()`/`focus()`/`blur()` for any element's native UI methods.
+- [`REQUEST.md`](./REQUEST.md) — `mithril-lynx/request`: `m.request` over Lynx's `fetch`.
 - [`ANDROID_APK_GUIDE.md`](./ANDROID_APK_GUIDE.md) — building a native Android host and APK from scratch, Gradle-CLI only, including the `.ttf` cold-start hack from "Custom fonts" above. Automated end to end by `create-mithril-lynx --android`.
+
+Investigations and known gaps:
+
+- [`ROUTE_CONTRACT_ANALYSIS.md`](./ROUTE_CONTRACT_ANALYSIS.md) — `route` checked against Mithril 2.3.8's `m.route`, item by item, plus what Lynx offers for native navigation.
+- [`FETCH_INVESTIGATION.md`](./FETCH_INVESTIGATION.md) — the option-by-option gap analysis of `m.request` against Lynx's `fetch`, backed by real-device evidence.
+- [`UPDATE_ANIMATION_GAP.md`](./UPDATE_ANIMATION_GAP.md) — the open `<list update-animation>` gap: device evidence, hypotheses and next steps.
+
+Historical plans (removed from the tree in `71a6670`, still in git history):
+
+- `mithril-lynx-v2-desde-cero.md` — the full rewrite plan: architecture decisions, the three reload modes' device verification, and the postmortem on exactly what v1 got wrong.
+- `m-route-en-memoria.md` — how `m.route` was first designed and verified for an in-memory, URL-less environment.
+- `m-request-fetch-lynx.md` — the `m.request`-vs-`fetch` investigation plan and its execution log.
+
+Read one with `git show 71a6670^:.omo/plans/<file>`.
